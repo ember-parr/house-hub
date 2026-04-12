@@ -753,3 +753,17 @@ a { text-decoration: none; color: inherit; }
 }
 .back-link:hover { color: #555; }
 .back-link svg { width: 16px; height: 16px; }
+
+/* ── Bills nav button ── */
+.bl-nav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #f5f4f1;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #888;
+}

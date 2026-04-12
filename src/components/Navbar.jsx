@@ -56,7 +56,7 @@ const navItems = [
     children: [
       { to: '/Finances/Amex', label: 'Amex Tracker' },
       { to: '/Finances/Loan', label: 'Loan Tracker' },
-      { to: '/Finances/Monthly', label: 'Monthly Bills' },
+      { to: '/Finances/Bills', label: 'Monthly Bills' },
       { to: '/Finances/Spending', label: 'Spending Tracker' },
     ],
   },
