@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { useUserRole } from '../../hooks/useUserRole'
 import {
-  collection, addDoc, updateDoc, deleteDoc,
+  collection, addDoc, deleteDoc,
   doc, query, orderBy, onSnapshot,
   getDocs, serverTimestamp,
 } from 'firebase/firestore'
@@ -57,7 +57,6 @@ export default function Expenses() {
   const [transactions, setTransactions] = useState([])
   const [members, setMembers]           = useState([])
   const [personFilter, setPersonFilter] = useState('All')
-  const [statusFilter, setStatusFilter] = useState('All')
   const [showModal, setShowModal]       = useState(false)
   const [form, setForm]                 = useState(emptyForm)
   const [saving, setSaving]             = useState(false)
@@ -79,21 +78,19 @@ export default function Expenses() {
     })
   }, [user])
 
-  // Outstanding totals per person
+  // Outstanding totals per person — payments (negative amounts) reduce the balance
   const outstandingByPerson = members.map((m) => {
     const unsettled = transactions.filter((t) => t.assignedTo === m.id && !t.settled)
     return {
       ...m,
-      total: unsettled.reduce((s, t) => s + Number(t.amount), 0),
-      count: unsettled.length,
+      total: unsettled.reduce((s, t) => s + Number(t.amount), 0),  // net (charges − payments)
+      count: unsettled.filter((t) => Number(t.amount) > 0).length, // charges only
     }
   })
 
   // Filter transactions
   const filtered = transactions.filter((t) => {
     if (personFilter !== 'All' && t.assignedTo !== personFilter) return false
-    if (statusFilter === 'Outstanding' && t.settled) return false
-    if (statusFilter === 'Settled'     && !t.settled) return false
     return true
   })
 
@@ -117,8 +114,6 @@ export default function Expenses() {
     setSaving(false)
   }
 
-  const toggleSettled = (tx) =>
-    updateDoc(doc(db, 'amexTransactions', tx.id), { settled: !tx.settled })
 
   const handleDelete = (id) =>
     deleteDoc(doc(db, 'amexTransactions', id))
@@ -220,11 +215,6 @@ export default function Expenses() {
           })}
         </div>
       )}
-      <div className="filter-row" style={{ marginBottom: '1rem' }}>
-        {['All', 'Outstanding', 'Settled'].map((s) => (
-          <button key={s} className={`chip ${statusFilter === s ? 'chip-active' : ''}`} onClick={() => setStatusFilter(s)}>{s}</button>
-        ))}
-      </div>
 
       {/* Transactions grouped by month */}
       {Object.keys(visibleGrouped).length === 0 && (
@@ -232,20 +222,23 @@ export default function Expenses() {
       )}
 
       {Object.entries(visibleGrouped).map(([monthKey, txs]) => {
-        const monthTotal = txs.reduce((s, t) => s + Number(t.amount), 0)
+        const monthNet = txs.reduce((s, t) => s + Number(t.amount), 0)
         return (
           <div key={monthKey} className="profile-card" style={{ marginBottom: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <div style={{ fontSize: '11px', fontWeight: 500, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 {monthLabel(monthKey + '-01')}
               </div>
-              <div style={{ fontSize: '12px', fontWeight: 500, color: '#888' }}>${fmt(monthTotal)}</div>
+              <div style={{ fontSize: '12px', fontWeight: 500, color: monthNet < 0 ? '#1D9E75' : '#888' }}>
+                {monthNet < 0 ? `+$${fmt(Math.abs(monthNet))}` : `$${fmt(monthNet)}`}
+              </div>
             </div>
 
             {txs.map((tx, i) => {
-              const mStyle  = COLOR_STYLES[tx.assignedToColor] || COLOR_STYLES.teal
-              const aName   = tx.assignedToName || 'Unknown'
-              const icon    = CATEGORY_ICONS[tx.category] || CATEGORY_ICONS.Other
+              const mStyle    = COLOR_STYLES[tx.assignedToColor] || COLOR_STYLES.teal
+              const aName     = tx.assignedToName || 'Unknown'
+              const icon      = CATEGORY_ICONS[tx.category] || CATEGORY_ICONS.Other
+              const isPayment = Number(tx.amount) < 0
               return (
                 <div key={tx.id} style={{
                   display: 'flex', alignItems: 'center', gap: '10px',
@@ -253,8 +246,14 @@ export default function Expenses() {
                   borderBottom: i < txs.length - 1 ? '0.5px solid #f5f4f1' : 'none',
                   opacity: tx.settled ? 0.55 : 1,
                 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '8px', background: '#f5f4f1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#888' }}>
-                    <span style={{ width: 15, height: 15, display: 'flex' }}>{icon}</span>
+                  <div style={{ width: 32, height: 32, borderRadius: '8px', background: isPayment ? '#EAF3DE' : '#f5f4f1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: isPayment ? '#1D9E75' : '#888' }}>
+                    {isPayment ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ width: 15, height: 15 }}>
+                        <line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
+                      </svg>
+                    ) : (
+                      <span style={{ width: 15, height: 15, display: 'flex' }}>{icon}</span>
+                    )}
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -265,27 +264,26 @@ export default function Expenses() {
                       <span style={{ fontSize: '11px', color: '#aaa' }}>
                         {new Date(tx.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </span>
+                      {isPayment && (
+                        <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', background: '#EAF3DE', color: '#3B6D11' }}>
+                          Payment
+                        </span>
+                      )}
                       <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', background: mStyle.bg, color: mStyle.color }}>
                         {aName.split(' ')[0]}
-                      </span>
-                      <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', background: tx.settled ? '#EAF3DE' : '#FAEEDA', color: tx.settled ? '#3B6D11' : '#854F0B' }}>
-                        {tx.settled ? 'Settled' : 'Outstanding'}
                       </span>
                     </div>
                   </div>
 
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: '13px', fontWeight: 500 }}>${fmt(tx.amount)}</div>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '3px' }}>
-                      <button onClick={() => toggleSettled(tx)} style={{ fontSize: '10px', color: tx.settled ? '#aaa' : '#1D9E75', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
-                        {tx.settled ? 'Unsettle' : 'Settle'}
-                      </button>
-                      {isAdmin && (
-                        <button onClick={() => handleDelete(tx.id)} style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
-                          Delete
-                        </button>
-                      )}
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: isPayment ? '#1D9E75' : 'inherit' }}>
+                      {isPayment ? `+$${fmt(Math.abs(Number(tx.amount)))}` : `$${fmt(tx.amount)}`}
                     </div>
+                    {isAdmin && (
+                      <button onClick={() => handleDelete(tx.id)} style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', marginTop: '3px' }}>
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               )
