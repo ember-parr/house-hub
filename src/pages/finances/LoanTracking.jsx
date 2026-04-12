@@ -35,6 +35,7 @@ export default function Loan() {
   const [members, setMembers] = useState([])
   const [showModal, setShowModal] = useState(false)
   const [showSetup, setShowSetup] = useState(false)
+  const [showPaidBreakdown, setShowPaidBreakdown] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState({
@@ -75,11 +76,6 @@ export default function Loan() {
   const original = config ? Number(config.originalBalance) : 0
   const balance = original - totalPaid
   const pctPaid = original > 0 ? Math.min(100, Math.round((totalPaid / original) * 100)) : 0
-  const emberPaid = payments.filter(p => p.paidBy === '5UzMSgwJmNeAnQz0eFtdtR3LUhI2' || p.paidBy === 'HrmByeqSg0Ztii0pWzYn1vAGq613')
-  const emberTotal = emberPaid.reduce((sum, p) => sum + Number(p.amount), 0)
-  const justinPaid = payments.filter(p => p.paidBy === 'UvyyIYtZjKRT9ZtTrRXRXnNVDU03')
-  const justinTotal = justinPaid.reduce((sum, p) => sum + Number(p.amount), 0)
-
   // Estimated payoff — average of last 3 payments
   function estPayoff() {
     if (payments.length === 0 || balance <= 0) return null
@@ -235,21 +231,17 @@ export default function Loan() {
 
         {/* Stats */}
         <div className="stats-grid" style={{ marginTop: '12px' }}>
-          <div className="stat-box">
+          <button
+            className="stat-box"
+            style={{ cursor: 'pointer', background: 'none', border: 'none', textAlign: 'center', fontFamily: 'inherit', padding: 0 }}
+            onClick={() => setShowPaidBreakdown(true)}
+          >
             <div className="stat-val">${fmt(totalPaid)}</div>
-            <div className="stat-lbl">Total paid</div>
-          </div>
+            <div className="stat-lbl">Total paid ›</div>
+          </button>
           <div className="stat-box">
             <div className="stat-val">{estPayoff() || '—'}</div>
             <div className="stat-lbl">Est. payoff</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-val">${fmt(justinTotal)}</div>
-            <div className="stat-lbl">Justin Paid</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-val">${fmt(emberTotal)}</div>
-            <div className="stat-lbl">Ember Paid</div>
           </div>
         </div>
       </div>
@@ -287,6 +279,43 @@ export default function Loan() {
           )
         })}
       </div>
+
+      {/* Paid breakdown modal */}
+      {showPaidBreakdown && (
+        <div className="modal-overlay" onClick={() => setShowPaidBreakdown(false)}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+            <h2 className="modal-title">Payment breakdown</h2>
+            {Object.values(
+              members.reduce((groups, m) => {
+                const name = m.nickname || m.displayName || 'Member'
+                if (!groups[name]) groups[name] = { name, color: m.color, ids: [] }
+                groups[name].ids.push(m.id)
+                return groups
+              }, {})
+            ).map((group) => {
+              const mStyle = COLOR_STYLES[group.color] || COLOR_STYLES.teal
+              const groupPayments = payments.filter((p) => group.ids.includes(p.paidBy))
+              const groupTotal = groupPayments.reduce((sum, p) => sum + Number(p.amount), 0)
+              return (
+                <div key={group.name} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: mStyle.bg, color: mStyle.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}>
+                    {initials(group.name)}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '14px', fontWeight: 500 }}>{group.name}</div>
+                    <div style={{ fontSize: '12px', color: '#aaa' }}>{groupPayments.length} payment{groupPayments.length !== 1 ? 's' : ''}</div>
+                  </div>
+                  <div style={{ fontSize: '16px', fontWeight: 500, color: mStyle.color }}>${fmt(groupTotal)}</div>
+                </div>
+              )
+            })}
+            <button className="btn-primary" style={{ background: '#534AB7', marginTop: '8px' }} onClick={() => setShowPaidBreakdown(false)}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Log payment modal */}
       {showModal && (
