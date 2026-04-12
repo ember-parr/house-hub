@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="#1A2920"/>
+  <!-- Double mountain peak / roof -->
+  <polygon points="3,21 10,9 16,15 22,9 29,21" fill="#8F6779"/>
+  <!-- House body -->
+  <rect x="7" y="20" width="18" height="9" rx="1.5" fill="#ADCBBA"/>
+  <!-- Door -->
+  <rect x="13" y="23" width="6" height="6" rx="1" fill="#1A2920"/>
+</svg>
