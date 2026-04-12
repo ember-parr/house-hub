@@ -16,7 +16,7 @@ import Wishlist from './pages/lists/WishLists'
 import Finances from './pages/finances/FinanceHome'
 import Amex from './pages/finances/AmexTracking'
 import Loan from './pages/finances/LoanTracking'
-import Monthly from './pages/finances/MonthlyBills'
+import Bills from './pages/finances/MonthlyBills'
 import Spending from './pages/finances/SpendingTracking'
 import Other from './pages/other/OtherHome'
 
@@ -47,7 +47,7 @@ function App() {
                       <Route path="/finances" element={<Finances />} />
                       <Route path="/finances/amex" element={<Amex />} />
                       <Route path="/finances/loan" element={<Loan />} />
-                      <Route path="/finances/monthly" element={<Monthly />} />
+                      <Route path="/finances/bills" element={<Bills />} />
                       <Route path="/finances/spending" element={<Spending />} />
                       <Route path="/other" element={<Other />} />
                     </Routes>

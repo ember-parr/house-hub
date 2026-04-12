@@ -1,18 +1,18 @@
 import { Link } from 'react-router-dom'
 
-
-export default function ListsHome() {
-  const greeting = "Finances | Monthly Bills"
-
+export default function Bills() {
   return (
     <div className="page">
-      <div className="home-greeting">
-        <h1>{greeting}</h1>
-        <p>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+      <div className="page-header">
+        <Link to="/finances" className="back-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Finances
+        </Link>
       </div>
-
-      <div className="section-label">Coming Soon...</div>
-      
+      <h1 className="page-title">Monthly Bills</h1>
+      <div className="empty-state">Coming soon</div>
     </div>
   )
 }
