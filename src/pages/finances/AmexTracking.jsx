@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
+import { useUserRole } from '../../hooks/useUserRole'
 import {
   collection, addDoc, updateDoc, deleteDoc,
   doc, query, orderBy, onSnapshot,
@@ -52,6 +53,7 @@ const emptyForm = {
 
 export default function Expenses() {
   const { user }  = useAuth()
+  const { loading: roleLoading, isAdmin, isBlocked } = useUserRole()
   const [transactions, setTransactions] = useState([])
   const [members, setMembers]           = useState([])
   const [personFilter, setPersonFilter] = useState('All')
@@ -95,14 +97,6 @@ export default function Expenses() {
     return true
   })
 
-  // Group by month
-  const grouped = filtered.reduce((acc, t) => {
-    const key = t.date?.slice(0, 7) || 'Unknown'
-    if (!acc[key]) acc[key] = []
-    acc[key].push(t)
-    return acc
-  }, {})
-
   const handleAdd = async () => {
     if (!form.merchant.trim() || !form.amount || !form.assignedTo) return
     setSaving(true)
@@ -129,6 +123,38 @@ export default function Expenses() {
   const handleDelete = (id) =>
     deleteDoc(doc(db, 'amexTransactions', id))
 
+  // Role-scoped views
+  const visibleTransactions   = isAdmin ? filtered : filtered.filter((t) => t.assignedTo === user?.uid)
+  const visibleOutstanding    = isAdmin ? outstandingByPerson : outstandingByPerson.filter((m) => m.id === user?.uid)
+  const visibleMembers        = isAdmin ? members : members.filter((m) => m.id === user?.uid)
+
+  // Re-group scoped transactions by month
+  const visibleGrouped = visibleTransactions.reduce((acc, t) => {
+    const key = t.date?.slice(0, 7) || 'Unknown'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(t)
+    return acc
+  }, {})
+
+  if (roleLoading) return null
+
+  if (isBlocked) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <Link to="/finances" className="back-link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Finances
+          </Link>
+        </div>
+        <h1 className="page-title" style={{ marginBottom: '1rem' }}>AMEX Expenses</h1>
+        <AccessBlocked />
+      </div>
+    )
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -138,23 +164,25 @@ export default function Expenses() {
           </svg>
           Finances
         </Link>
-        <button className="icon-btn" onClick={() => setShowModal(true)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+        {isAdmin && (
+          <button className="icon-btn" onClick={() => setShowModal(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <h1 className="page-title" style={{ marginBottom: '1rem' }}>AMEX Expenses</h1>
 
       {/* Outstanding by person */}
-      {members.length > 0 && (
+      {visibleMembers.length > 0 && (
         <div className="profile-card" style={{ marginBottom: '12px' }}>
           <div style={{ fontSize: '11px', fontWeight: 500, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
             Outstanding by person
           </div>
           <div className="stats-grid">
-            {outstandingByPerson.map((m) => {
+            {visibleOutstanding.map((m) => {
               const mStyle = COLOR_STYLES[m.color] || COLOR_STYLES.teal
               const name   = m.nickname || m.displayName || 'Member'
               return (
@@ -174,22 +202,24 @@ export default function Expenses() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="filter-row" style={{ marginBottom: '8px' }}>
-        <button className={`chip ${personFilter === 'All' ? 'chip-active' : ''}`} onClick={() => setPersonFilter('All')}>All</button>
-        {members.map((m) => {
-          const name   = m.nickname || m.displayName || 'Member'
-          const mStyle = COLOR_STYLES[m.color] || COLOR_STYLES.teal
-          return (
-            <button key={m.id} className={`chip ${personFilter === m.id ? 'chip-active' : ''}`} onClick={() => setPersonFilter(m.id)}>
-              <span style={{ width: 12, height: 12, borderRadius: '50%', background: mStyle.bg, color: mStyle.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '7px', fontWeight: 700 }}>
-                {initials(name)[0]}
-              </span>
-              {name.split(' ')[0]}
-            </button>
-          )
-        })}
-      </div>
+      {/* Filters — person filter only shown to admin */}
+      {isAdmin && (
+        <div className="filter-row" style={{ marginBottom: '8px' }}>
+          <button className={`chip ${personFilter === 'All' ? 'chip-active' : ''}`} onClick={() => setPersonFilter('All')}>All</button>
+          {members.map((m) => {
+            const name   = m.nickname || m.displayName || 'Member'
+            const mStyle = COLOR_STYLES[m.color] || COLOR_STYLES.teal
+            return (
+              <button key={m.id} className={`chip ${personFilter === m.id ? 'chip-active' : ''}`} onClick={() => setPersonFilter(m.id)}>
+                <span style={{ width: 12, height: 12, borderRadius: '50%', background: mStyle.bg, color: mStyle.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '7px', fontWeight: 700 }}>
+                  {initials(name)[0]}
+                </span>
+                {name.split(' ')[0]}
+              </button>
+            )
+          })}
+        </div>
+      )}
       <div className="filter-row" style={{ marginBottom: '1rem' }}>
         {['All', 'Outstanding', 'Settled'].map((s) => (
           <button key={s} className={`chip ${statusFilter === s ? 'chip-active' : ''}`} onClick={() => setStatusFilter(s)}>{s}</button>
@@ -197,11 +227,11 @@ export default function Expenses() {
       </div>
 
       {/* Transactions grouped by month */}
-      {Object.keys(grouped).length === 0 && (
+      {Object.keys(visibleGrouped).length === 0 && (
         <div className="empty-state">No transactions yet — add one above!</div>
       )}
 
-      {Object.entries(grouped).map(([monthKey, txs]) => {
+      {Object.entries(visibleGrouped).map(([monthKey, txs]) => {
         const monthTotal = txs.reduce((s, t) => s + Number(t.amount), 0)
         return (
           <div key={monthKey} className="profile-card" style={{ marginBottom: '12px' }}>
@@ -250,9 +280,11 @@ export default function Expenses() {
                       <button onClick={() => toggleSettled(tx)} style={{ fontSize: '10px', color: tx.settled ? '#aaa' : '#1D9E75', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
                         {tx.settled ? 'Unsettle' : 'Settle'}
                       </button>
-                      <button onClick={() => handleDelete(tx.id)} style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
-                        Delete
-                      </button>
+                      {isAdmin && (
+                        <button onClick={() => handleDelete(tx.id)} style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -350,6 +382,23 @@ export default function Expenses() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AccessBlocked() {
+  return (
+    <div style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f5f4f1', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" style={{ width: 22, height: 22 }}>
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0110 0v4" />
+        </svg>
+      </div>
+      <div style={{ fontWeight: 500, fontSize: '15px', marginBottom: '6px' }}>Access restricted</div>
+      <div style={{ fontSize: '13px', color: '#aaa', lineHeight: 1.5 }}>
+        An admin needs to add you to the household<br />before you can view finances.
+      </div>
     </div>
   )
 }

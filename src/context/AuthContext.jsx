@@ -32,6 +32,7 @@ export function AuthProvider({ children }) {
       photoURL:    u.photoURL,
       color:       colorForUid(u.uid),
       joinedAt:    serverTimestamp(),
+      userType:    'new',
     }, { merge: true })
   }
 

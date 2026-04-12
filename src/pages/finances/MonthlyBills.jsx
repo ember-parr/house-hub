@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
+import { useUserRole } from '../../hooks/useUserRole'
 import {
   collection, addDoc, updateDoc, deleteDoc,
   doc, query, orderBy, onSnapshot,
-  getDocs, setDoc, serverTimestamp,
+  getDocs, serverTimestamp,
 } from 'firebase/firestore'
 
 function fmt(n) {
@@ -30,6 +31,7 @@ const STATUS_STYLES = {
 const emptyBillForm = { name: '', amount: '', dueDay: '', isAutopay: false }
 
 export default function Bills() {
+  const { loading: roleLoading, isAdmin, isBlocked } = useUserRole()
   const now = new Date()
   const [year, setYear]           = useState(now.getFullYear())
   const [month, setMonth]         = useState(now.getMonth())
@@ -137,6 +139,25 @@ export default function Bills() {
   const unpaidBills = billsWithRecords.filter((b) => b.record?.status === 'unpaid')
   const paidBills   = billsWithRecords.filter((b) => b.record?.status !== 'unpaid')
 
+  if (roleLoading) return null
+
+  if (isBlocked) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <Link to="/finances" className="back-link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Finances
+          </Link>
+        </div>
+        <h1 className="page-title" style={{ marginBottom: '1rem' }}>Monthly Bills</h1>
+        <AccessBlocked />
+      </div>
+    )
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -146,15 +167,17 @@ export default function Bills() {
           </svg>
           Finances
         </Link>
-        <button
-          className="icon-btn"
-          style={{ background: '#FAEEDA', color: '#BA7517' }}
-          onClick={() => setShowModal(true)}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+        {isAdmin && (
+          <button
+            className="icon-btn"
+            style={{ background: '#FAEEDA', color: '#BA7517' }}
+            onClick={() => setShowModal(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <h1 className="page-title" style={{ marginBottom: '1rem' }}>Monthly Bills</h1>
@@ -205,6 +228,7 @@ export default function Bills() {
                 bill={bill}
                 isLast={i === unpaidBills.length - 1 && paidBills.length === 0}
                 year={year} month={month}
+                isAdmin={isAdmin}
                 onCycle={cycleStatus}
                 onNote={(id, current) => { setShowNoteFor(id); setNoteText(current || '') }}
                 onDelete={handleDeleteBill}
@@ -225,6 +249,7 @@ export default function Bills() {
                 bill={bill}
                 isLast={i === paidBills.length - 1}
                 year={year} month={month}
+                isAdmin={isAdmin}
                 onCycle={cycleStatus}
                 onNote={(id, current) => { setShowNoteFor(id); setNoteText(current || '') }}
                 onDelete={handleDeleteBill}
@@ -317,7 +342,7 @@ export default function Bills() {
   )
 }
 
-function BillRow({ bill, isLast, year, month, onCycle, onNote, onDelete }) {
+function BillRow({ bill, isLast, year, month, isAdmin, onCycle, onNote, onDelete }) {
   const record  = bill.record
   const status  = record?.status || 'unpaid'
   const styles  = STATUS_STYLES[status]
@@ -386,12 +411,31 @@ function BillRow({ bill, isLast, year, month, onCycle, onNote, onDelete }) {
 
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
         <div style={{ fontSize: '13px', fontWeight: 500 }}>${fmt(amount)}</div>
-        <button
-          onClick={() => onDelete(bill.id)}
-          style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', marginTop: '3px' }}
-        >
-          Remove
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => onDelete(bill.id)}
+            style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', marginTop: '3px' }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AccessBlocked() {
+  return (
+    <div style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f5f4f1', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" style={{ width: 22, height: 22 }}>
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0110 0v4" />
+        </svg>
+      </div>
+      <div style={{ fontWeight: 500, fontSize: '15px', marginBottom: '6px' }}>Access restricted</div>
+      <div style={{ fontSize: '13px', color: '#aaa', lineHeight: 1.5 }}>
+        An admin needs to add you to the household<br />before you can view finances.
       </div>
     </div>
   )

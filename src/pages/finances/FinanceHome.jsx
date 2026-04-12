@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useUserRole } from '../../hooks/useUserRole'
 
 const sections = [
   {
@@ -56,6 +57,21 @@ const sections = [
 ]
 
 export default function Finances() {
+  const { loading, isBlocked } = useUserRole()
+
+  if (loading) return null
+
+  if (isBlocked) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <h1 className="page-title">Finances</h1>
+        </div>
+        <AccessBlocked />
+      </div>
+    )
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -70,6 +86,23 @@ export default function Finances() {
             <div className="card-subtitle">{section.subtitle}</div>
           </Link>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function AccessBlocked() {
+  return (
+    <div style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f5f4f1', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" style={{ width: 22, height: 22 }}>
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0110 0v4" />
+        </svg>
+      </div>
+      <div style={{ fontWeight: 500, fontSize: '15px', marginBottom: '6px' }}>Access restricted</div>
+      <div style={{ fontSize: '13px', color: '#aaa', lineHeight: 1.5 }}>
+        An admin needs to add you to the household<br />before you can view finances.
       </div>
     </div>
   )

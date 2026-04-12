@@ -15,7 +15,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
 
-        <img src={justinmaid} alt="" className="login-card-image" />
+        <img src={justinmaid} alt="Justin as a Maid" className="login-card-image" />
 
         <div className="login-logo">Snoop's<span>House</span></div>
         <p className="login-subtitle">No Peasants Allowed</p>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
+import { useUserRole } from '../../hooks/useUserRole'
 import {
   doc, getDoc, setDoc, collection,
   addDoc, query, orderBy, onSnapshot,
@@ -9,12 +10,12 @@ import {
 } from 'firebase/firestore'
 
 const COLOR_STYLES = {
-  teal:   { bg: '#E1F5EE', color: '#0F6E56' },
+  teal: { bg: '#E1F5EE', color: '#0F6E56' },
   purple: { bg: '#EEEDFE', color: '#534AB7' },
-  amber:  { bg: '#FAEEDA', color: '#854F0B' },
-  coral:  { bg: '#FAECE7', color: '#993C1D' },
-  blue:   { bg: '#E6F1FB', color: '#185FA5' },
-  green:  { bg: '#EAF3DE', color: '#3B6D11' },
+  amber: { bg: '#FAEEDA', color: '#854F0B' },
+  coral: { bg: '#FAECE7', color: '#993C1D' },
+  blue: { bg: '#E6F1FB', color: '#185FA5' },
+  green: { bg: '#EAF3DE', color: '#3B6D11' },
 }
 
 function initials(name) {
@@ -23,17 +24,18 @@ function initials(name) {
 }
 
 function fmt(n) {
-  return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
 export default function Loan() {
   const { user } = useAuth()
-  const [config, setConfig]         = useState(null)
-  const [payments, setPayments]     = useState([])
-  const [members, setMembers]       = useState([])
-  const [showModal, setShowModal]   = useState(false)
-  const [showSetup, setShowSetup]   = useState(false)
-  const [saving, setSaving]         = useState(false)
+  const { loading: roleLoading, isAdmin, isBlocked } = useUserRole()
+  const [config, setConfig] = useState(null)
+  const [payments, setPayments] = useState([])
+  const [members, setMembers] = useState([])
+  const [showModal, setShowModal] = useState(false)
+  const [showSetup, setShowSetup] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState({
     amount: '', date: new Date().toISOString().split('T')[0],
@@ -69,19 +71,23 @@ export default function Loan() {
   }, [])
 
   // Derived stats
-  const totalPaid    = payments.reduce((sum, p) => sum + Number(p.amount), 0)
-  const original     = config ? Number(config.originalBalance) : 0
-  const balance      = original - totalPaid
-  const pctPaid      = original > 0 ? Math.min(100, Math.round((totalPaid / original) * 100)) : 0
+  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0)
+  const original = config ? Number(config.originalBalance) : 0
+  const balance = original - totalPaid
+  const pctPaid = original > 0 ? Math.min(100, Math.round((totalPaid / original) * 100)) : 0
+  const emberPaid = payments.filter(p => p.paidBy === '5UzMSgwJmNeAnQz0eFtdtR3LUhI2' || p.paidBy === 'HrmByeqSg0Ztii0pWzYn1vAGq613')
+  const emberTotal = emberPaid.reduce((sum, p) => sum + Number(p.amount), 0)
+  const justinPaid = payments.filter(p => p.paidBy === 'UvyyIYtZjKRT9ZtTrRXRXnNVDU03')
+  const justinTotal = justinPaid.reduce((sum, p) => sum + Number(p.amount), 0)
 
   // Estimated payoff — average of last 3 payments
   function estPayoff() {
     if (payments.length === 0 || balance <= 0) return null
     const recent = payments.slice(0, 3)
-    const avg    = recent.reduce((s, p) => s + Number(p.amount), 0) / recent.length
+    const avg = recent.reduce((s, p) => s + Number(p.amount), 0) / recent.length
     if (avg <= 0) return null
     const months = Math.ceil(balance / avg)
-    const d      = new Date()
+    const d = new Date()
     d.setMonth(d.getMonth() + months)
     return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
   }
@@ -90,9 +96,9 @@ export default function Loan() {
     if (!setupForm.name || !setupForm.originalBalance) return
     setSaving(true)
     await setDoc(doc(db, 'loan', 'config'), {
-      name:            setupForm.name,
+      name: setupForm.name,
       originalBalance: Number(setupForm.originalBalance),
-      createdAt:       serverTimestamp(),
+      createdAt: serverTimestamp(),
     })
     setConfig({ name: setupForm.name, originalBalance: Number(setupForm.originalBalance) })
     setShowSetup(false)
@@ -102,29 +108,48 @@ export default function Loan() {
   const handleAdd = async () => {
     if (!form.amount || !form.paidBy) return
     setSaving(true)
-    const member   = members.find((m) => m.id === form.paidBy)
-    const prevBal  = payments.length > 0
+    const member = members.find((m) => m.id === form.paidBy)
+    const prevBal = payments.length > 0
       ? Number(payments[0].balanceAfter)
       : original
-    const newBal   = prevBal - Number(form.amount)
+    const newBal = prevBal - Number(form.amount)
 
     await addDoc(collection(db, 'loan', 'config', 'payments'), {
-      amount:       Number(form.amount),
-      date:         form.date,
-      paidBy:       member?.id || null,
-      paidByName:   member ? (member.nickname || member.displayName) : null,
-      paidByColor:  member?.color || null,
-      notes:        form.notes || null,
+      amount: Number(form.amount),
+      date: form.date,
+      paidBy: member?.id || null,
+      paidByName: member ? (member.nickname || member.displayName) : null,
+      paidByColor: member?.color || null,
+      notes: form.notes || null,
       balanceAfter: newBal,
-      createdAt:    serverTimestamp(),
+      createdAt: serverTimestamp(),
     })
     setForm({ amount: '', date: new Date().toISOString().split('T')[0], paidBy: members[0]?.id || null, notes: '' })
     setShowModal(false)
     setSaving(false)
   }
 
-  // Setup screen
-  if (showSetup) {
+  if (roleLoading) return null
+
+  if (isBlocked) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <Link to="/finances" className="back-link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Finances
+          </Link>
+        </div>
+        <h1 className="page-title" style={{ marginBottom: '1rem' }}>Loan Tracker</h1>
+        <AccessBlocked />
+      </div>
+    )
+  }
+
+  // Setup screen (admin only)
+  if (showSetup && isAdmin) {
     return (
       <div className="page">
         <div className="page-header">
@@ -172,15 +197,17 @@ export default function Loan() {
           </svg>
           Finances
         </Link>
-        <button
-          className="icon-btn"
-          style={{ background: '#EEEDFE', color: '#534AB7' }}
-          onClick={() => setShowModal(true)}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+        {isAdmin && (
+          <button
+            className="icon-btn"
+            style={{ background: '#EEEDFE', color: '#534AB7' }}
+            onClick={() => setShowModal(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <h1 className="page-title" style={{ marginBottom: '1rem' }}>{config?.name || 'Loan Tracker'}</h1>
@@ -216,6 +243,14 @@ export default function Loan() {
             <div className="stat-val">{estPayoff() || '—'}</div>
             <div className="stat-lbl">Est. payoff</div>
           </div>
+          <div className="stat-box">
+            <div className="stat-val">${fmt(justinTotal)}</div>
+            <div className="stat-lbl">Justin Paid</div>
+          </div>
+          <div className="stat-box">
+            <div className="stat-val">${fmt(emberTotal)}</div>
+            <div className="stat-lbl">Ember Paid</div>
+          </div>
         </div>
       </div>
 
@@ -227,7 +262,7 @@ export default function Loan() {
         )}
         {payments.map((p, i) => {
           const mStyle = COLOR_STYLES[p.paidByColor] || COLOR_STYLES.teal
-          const name   = p.paidByName || 'Unknown'
+          const name = p.paidByName || 'Unknown'
           return (
             <div key={p.id} style={{
               display: 'flex', alignItems: 'center', gap: '10px',
@@ -287,8 +322,8 @@ export default function Loan() {
                 </div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {members.map((m) => {
-                    const name     = m.nickname || m.displayName || 'Member'
-                    const mStyle   = COLOR_STYLES[m.color] || COLOR_STYLES.teal
+                    const name = m.nickname || m.displayName || 'Member'
+                    const mStyle = COLOR_STYLES[m.color] || COLOR_STYLES.teal
                     const selected = form.paidBy === m.id
                     return (
                       <button
@@ -333,6 +368,23 @@ export default function Loan() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AccessBlocked() {
+  return (
+    <div style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f5f4f1', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" style={{ width: 22, height: 22 }}>
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0110 0v4" />
+        </svg>
+      </div>
+      <div style={{ fontWeight: 500, fontSize: '15px', marginBottom: '6px' }}>Access restricted</div>
+      <div style={{ fontSize: '13px', color: '#aaa', lineHeight: 1.5 }}>
+        An admin needs to add you to the household<br />before you can view finances.
+      </div>
     </div>
   )
 }

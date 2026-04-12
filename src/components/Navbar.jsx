@@ -87,6 +87,7 @@ function NavAvatar({ user }) {
 
   if (user?.photoURL && !imgError) {
     return (
+      <div>
       <img
         src={user.photoURL}
         alt={user.displayName}
@@ -94,12 +95,15 @@ function NavAvatar({ user }) {
         onError={() => setImgError(true)}
         className="nav-avatar"
       />
+      <div className="member-name">{user.displayNamed}</div>
+      </div>
     )
   }
 
   const initial = user?.displayName?.[0]?.toUpperCase() || '?'
   return (
-    <div className="nav-avatar nav-avatar-fallback">{initial}</div>
+    <div className="nav-avatar nav-avatar-fallback">{initial}
+    <div className="member-name">{user.displayNamed}</div></div>
   )
 }
 
@@ -157,6 +161,7 @@ export default function Navbar() {
           <div className="nav-user">
             {/* <img src={user.photoURL} alt={user.displayName} className="nav-avatar" /> */}
             <NavAvatar user={user} />
+            <div className="member-name">{user.displayNamed}</div>
             <button className="nav-signout" onClick={logOut}>Sign out</button>
           </div>
         )}
