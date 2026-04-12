@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import {
-    doc, getDoc, setDoc, updateDoc,
-    collection, getDocs, query, orderBy,
+    doc, getDoc, updateDoc,
+    collection, getDocs, query, orderBy, onSnapshot,
 } from 'firebase/firestore'
 
 const COLOR_STYLES = {
@@ -50,7 +50,10 @@ export default function Profile() {
     const [nickname, setNickname] = useState('')
     const [saving, setSaving] = useState(false)
     const [savedMsg, setSavedMsg] = useState(false)
-    const [taskStats, setTaskStats] = useState({ assigned: 0, completed: 0 })
+    const [activity, setActivity] = useState({
+        todosAssigned: 0, todosComplete: 0,
+        shoppingAdded: 0, shoppingBought: 0,
+    })
 
     // Load current user's profile
     useEffect(() => {
@@ -75,17 +78,22 @@ export default function Profile() {
         load()
     }, [])
 
-    // Load task stats for current user
+    // Live activity stats across collections
     useEffect(() => {
         if (!user) return
-        const load = async () => {
-            const snap = await getDocs(collection(db, 'maintenance'))
+        const unsubTodos = onSnapshot(collection(db, 'todos'), (snap) => {
             const all = snap.docs.map((d) => d.data())
             const assigned = all.filter((t) => t.assignedTo === user.uid).length
-            const completed = all.filter((t) => t.assignedTo === user.uid && t.completed).length
-            setTaskStats({ assigned, completed })
-        }
-        load()
+            const complete = all.filter((t) => t.assignedTo === user.uid && t.status === 'Complete').length
+            setActivity((prev) => ({ ...prev, todosAssigned: assigned, todosComplete: complete }))
+        })
+        const unsubShopping = onSnapshot(collection(db, 'shopping'), (snap) => {
+            const all = snap.docs.map((d) => d.data())
+            const added = all.filter((i) => i.addedBy === user.uid).length
+            const bought = all.filter((i) => i.addedBy === user.uid && i.bought).length
+            setActivity((prev) => ({ ...prev, shoppingAdded: added, shoppingBought: bought }))
+        })
+        return () => { unsubTodos(); unsubShopping() }
     }, [user])
 
     const saveNickname = async () => {
@@ -156,12 +164,20 @@ export default function Profile() {
                 <div className="profile-section-title">Your activity</div>
                 <div className="stats-grid">
                     <div className="stat-box">
-                        <div className="stat-val">{taskStats.assigned}</div>
-                        <div className="stat-lbl">Tasks assigned</div>
+                        <div className="stat-val">{activity.todosAssigned}</div>
+                        <div className="stat-lbl">To-dos assigned</div>
                     </div>
                     <div className="stat-box">
-                        <div className="stat-val">{taskStats.completed}</div>
-                        <div className="stat-lbl">Completed</div>
+                        <div className="stat-val">{activity.todosComplete}</div>
+                        <div className="stat-lbl">To-dos complete</div>
+                    </div>
+                    <div className="stat-box">
+                        <div className="stat-val">{activity.shoppingAdded}</div>
+                        <div className="stat-lbl">Items added</div>
+                    </div>
+                    <div className="stat-box">
+                        <div className="stat-val">{activity.shoppingBought}</div>
+                        <div className="stat-lbl">Items bought</div>
                     </div>
                 </div>
             </div>

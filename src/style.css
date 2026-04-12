@@ -740,3 +740,16 @@ a { text-decoration: none; color: inherit; }
 .nav-card:hover { transform: translateY(-1px); border-color: var(--light-secondary); }
 .nav-card:active { transform: scale(0.98); }
 .nav-card h2 { font-size: 15px; font-weight: 500; }
+
+/* ── Back link ── */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #999;
+  transition: color 0.15s;
+  margin-bottom: 0.75rem;
+}
+.back-link:hover { color: #555; }
+.back-link svg { width: 16px; height: 16px; }
