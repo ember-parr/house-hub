@@ -45,6 +45,7 @@
 
 ## Navigation
 - Home  
+- Profile
 - ToDos  
   - Household
   - Personal
@@ -59,4 +60,3 @@
   - Monthly
   - Spending
 - Other
-- Profile
