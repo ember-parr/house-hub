@@ -166,7 +166,7 @@ export default function ShoppingList() {
 
       {boughtItems.length > 0 && (
         <>
-          <div className="section-label" style={{ marginTop: '1.25rem' }}>In cart · {boughtItems.length}</div>
+          <div className="section-label" style={{ marginTop: '1.25rem' }}>Purchased · {boughtItems.length}</div>
           {boughtItems.map((item) => (
             <ItemRow key={item.id} item={item} displayStore={storeLabel(item)} onToggle={toggleBought} onEdit={openEdit} onDelete={handleDelete} />
           ))}
@@ -297,6 +297,11 @@ function ItemRow({ item, displayStore, onToggle, onEdit, onDelete }) {
           <span className={`badge ${STORE_STYLES[item.store] || 'badge-gray'}`}>{displayStore}</span>
           {item.estimatedCost != null && (
             <span style={{ fontSize: '10px', color: '#888' }}>${item.estimatedCost.toFixed(2)}</span>
+          )}
+          {item.bought && item.boughtAt && (
+            <span style={{ fontSize: '10px', color: '#aaa' }}>
+              Purchased {item.boughtAt.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </span>
           )}
         </div>
       </div>
