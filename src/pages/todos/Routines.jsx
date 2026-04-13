@@ -215,16 +215,17 @@ export default function Routines() {
                       <div style={{ display: 'flex', gap: '6px' }}>
                         {Array.from({ length: weeks }, (_, i) => i + 1).map((w) => {
                           const checked = isChecked(r.id, String(w))
+                          const isThisWeek = isCurrentMonth && w === Math.ceil(today / 7)
                           return (
                             <button
                               key={w}
                               onClick={() => toggle(r.id, String(w))}
                               style={{
                                 flex: 1, height: 32, borderRadius: 8,
-                                border: checked ? 'none' : '0.5px solid #e0ddd8',
+                                border: isThisWeek && !checked ? '1.5px solid #1D9E75' : checked ? 'none' : '0.5px solid #e0ddd8',
                                 background: checked ? '#1D9E75' : 'white',
-                                color: checked ? 'white' : '#888',
-                                fontSize: 11, fontWeight: checked ? 600 : 400,
+                                color: checked ? 'white' : isThisWeek ? '#1D9E75' : '#888',
+                                fontSize: 11, fontWeight: checked || isThisWeek ? 600 : 400,
                                 cursor: 'pointer', fontFamily: 'inherit',
                               }}
                             >
