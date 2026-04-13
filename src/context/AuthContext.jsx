@@ -25,14 +25,23 @@ export function AuthProvider({ children }) {
   const signInWithGoogle = async () => {
     const result = await signInWithPopup(auth, googleProvider)
     const u = result.user
+    let uType = ""
+    if (u.email === 'eparr.sr2@gmail.com' || u.email === 'eparr92@gmail.com') {
+      uType = 'admin'
+    } else if (u.email === 'iamlegacy931@gmail.com' || u.email === 'ember21892@gmail.com') {
+      uType = 'contributor'
+    } else {
+      uType = 'new'
+    }
+
     // Save profile to Firestore — merge so we don't overwrite nickname
     await setDoc(doc(db, 'users', u.uid), {
       displayName: u.displayName,
-      email:       u.email,
-      photoURL:    u.photoURL,
-      color:       colorForUid(u.uid),
-      joinedAt:    serverTimestamp(),
-      userType:    'new',
+      email: u.email,
+      photoURL: u.photoURL,
+      color: colorForUid(u.uid),
+      joinedAt: serverTimestamp(),
+      userType: uType,
     }, { merge: true })
   }
 

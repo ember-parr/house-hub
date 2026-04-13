@@ -42,7 +42,7 @@ export default function Loan() {
     amount: '', date: new Date().toISOString().split('T')[0],
     paidBy: null, notes: '',
   })
-  const [setupForm, setSetupForm] = useState({ name: '', originalBalance: '' })
+  const [setupForm, setSetupForm] = useState({ name: '', originalBalance: '', annualPayment: '' })
 
   // Load loan config
   useEffect(() => {
@@ -76,13 +76,12 @@ export default function Loan() {
   const original = config ? Number(config.originalBalance) : 0
   const balance = original - totalPaid
   const pctPaid = original > 0 ? Math.min(100, Math.round((totalPaid / original) * 100)) : 0
-  // Estimated payoff — average of last 3 payments
+  // Estimated payoff — current balance ÷ monthly payment (annualPayment / 12)
   function estPayoff() {
-    if (payments.length === 0 || balance <= 0) return null
-    const recent = payments.slice(0, 3)
-    const avg = recent.reduce((s, p) => s + Number(p.amount), 0) / recent.length
-    if (avg <= 0) return null
-    const months = Math.ceil(balance / avg)
+    const annual = config ? Number(config.annualPayment) : 0
+    if (!annual || balance <= 0) return null
+    const monthly = annual / 12
+    const months = Math.ceil(balance / monthly)
     const d = new Date()
     d.setMonth(d.getMonth() + months)
     return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
@@ -94,9 +93,10 @@ export default function Loan() {
     await setDoc(doc(db, 'loan', 'config'), {
       name: setupForm.name,
       originalBalance: Number(setupForm.originalBalance),
+      annualPayment: setupForm.annualPayment ? Number(setupForm.annualPayment) : null,
       createdAt: serverTimestamp(),
     })
-    setConfig({ name: setupForm.name, originalBalance: Number(setupForm.originalBalance) })
+    setConfig({ name: setupForm.name, originalBalance: Number(setupForm.originalBalance), annualPayment: setupForm.annualPayment ? Number(setupForm.annualPayment) : null })
     setShowSetup(false)
     setSaving(false)
   }
@@ -170,6 +170,13 @@ export default function Loan() {
             placeholder="Original balance $"
             value={setupForm.originalBalance}
             onChange={(e) => setSetupForm({ ...setupForm, originalBalance: e.target.value })}
+          />
+          <input
+            className="form-input"
+            type="number"
+            placeholder="Annual payment amount $ (for payoff estimate)"
+            value={setupForm.annualPayment}
+            onChange={(e) => setSetupForm({ ...setupForm, annualPayment: e.target.value })}
           />
           <button
             className="btn-primary"

@@ -8,6 +8,8 @@ import {
   getDocs, serverTimestamp,
 } from 'firebase/firestore'
 
+const ACCOUNTS = ['Ember Checking', 'Ember Savings', 'Joint Checking', 'Joint Savings', 'AMEX', 'ApplePay','Justin Checking', 'Justin Savings', 'Cash', 'Other']
+
 function fmt(n) {
   return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -20,15 +22,27 @@ function monthLabel(year, month) {
   return new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 
-const STATUS_CYCLE = { unpaid: 'paid', paid: 'autopay', autopay: 'unpaid' }
-
-const STATUS_STYLES = {
-  unpaid:  { badge: { background: '#FAECE7', color: '#993C1D' }, label: 'Unpaid',  check: null },
-  paid:    { badge: { background: '#EAF3DE', color: '#3B6D11' }, label: 'Paid',     check: '#1D9E75' },
-  autopay: { badge: { background: '#E6F1FB', color: '#185FA5' }, label: 'Autopay',  check: '#185FA5' },
+// Autopay bills are only "paid" once their due date has passed
+function effectiveStatus(bill, record, year, month) {
+  const stored = record?.status || 'unpaid'
+  if (stored === 'autopay') {
+    const today   = new Date()
+    const dueDate = new Date(year, month, Number(bill.dueDay))
+    if (today < dueDate) return 'scheduled'
+  }
+  return stored
 }
 
-const emptyBillForm = { name: '', amount: '', dueDay: '', isAutopay: false }
+const STATUS_CYCLE = { unpaid: 'paid', paid: 'autopay', autopay: 'unpaid', scheduled: 'paid' }
+
+const STATUS_STYLES = {
+  unpaid:    { badge: { background: '#FAECE7', color: '#993C1D' }, label: 'Unpaid',    check: null },
+  paid:      { badge: { background: '#EAF3DE', color: '#3B6D11' }, label: 'Paid',      check: '#1D9E75' },
+  autopay:   { badge: { background: '#E6F1FB', color: '#185FA5' }, label: 'Autopay',   check: '#185FA5' },
+  scheduled: { badge: { background: '#E6F1FB', color: '#185FA5' }, label: 'Scheduled', check: null },
+}
+
+const emptyBillForm = { name: '', amount: '', dueDay: '', isAutopay: false, account: 'Checking' }
 
 export default function Bills() {
   const { loading: roleLoading, isAdmin, isBlocked } = useUserRole()
@@ -41,6 +55,8 @@ export default function Bills() {
   const [showNoteFor, setShowNoteFor] = useState(null)
   const [noteText, setNoteText]   = useState('')
   const [billForm, setBillForm]   = useState(emptyBillForm)
+  const [editBill, setEditBill]   = useState(null)   // bill being edited
+  const [editForm, setEditForm]   = useState({})
   const [saving, setSaving]       = useState(false)
 
   // Real-time bills list
@@ -61,7 +77,6 @@ export default function Bills() {
       if (data.month === key) existing[data.billId] = { id: d.id, ...data }
     })
 
-    // Create missing records for this month
     for (const bill of billsList) {
       if (!existing[bill.id]) {
         const ref = await addDoc(collection(db, 'billRecords'), {
@@ -70,11 +85,17 @@ export default function Bills() {
           month:    key,
           amount:   bill.amount,
           dueDay:   bill.dueDay,
+          account:  bill.account || null,
           status:   bill.isAutopay ? 'autopay' : 'unpaid',
           notes:    '',
           createdAt: serverTimestamp(),
         })
-        existing[bill.id] = { id: ref.id, billId: bill.id, month: key, amount: bill.amount, dueDay: bill.dueDay, status: bill.isAutopay ? 'autopay' : 'unpaid', notes: '' }
+        existing[bill.id] = {
+          id: ref.id, billId: bill.id, month: key,
+          amount: bill.amount, dueDay: bill.dueDay,
+          account: bill.account || null,
+          status: bill.isAutopay ? 'autopay' : 'unpaid', notes: '',
+        }
       }
     }
     setRecords(existing)
@@ -97,6 +118,7 @@ export default function Bills() {
   const cycleStatus = async (billId) => {
     const record = records[billId]
     if (!record) return
+    // Cycle uses stored status, not effective (so autopay cycles correctly)
     const next = STATUS_CYCLE[record.status] || 'unpaid'
     await updateDoc(doc(db, 'billRecords', record.id), { status: next })
     setRecords((prev) => ({ ...prev, [billId]: { ...prev[billId], status: next } }))
@@ -119,6 +141,7 @@ export default function Bills() {
       amount:    Number(billForm.amount),
       dueDay:    Number(billForm.dueDay),
       isAutopay: billForm.isAutopay,
+      account:   billForm.account || null,
       createdAt: serverTimestamp(),
     })
     setBillForm(emptyBillForm)
@@ -126,18 +149,71 @@ export default function Bills() {
     setSaving(false)
   }
 
+  const openEdit = (bill) => {
+    const record = records[bill.id]
+    setEditBill(bill)
+    setEditForm({
+      name:      bill.name,
+      amount:    record?.amount ?? bill.amount,
+      dueDay:    bill.dueDay,
+      isAutopay: bill.isAutopay,
+      account:   bill.account || record?.account || 'Checking',
+    })
+  }
+
+  const handleEditSave = async () => {
+    if (!editBill || !editForm.name.trim() || !editForm.amount || !editForm.dueDay) return
+    setSaving(true)
+    // Update bill definition
+    await updateDoc(doc(db, 'bills', editBill.id), {
+      name:      editForm.name.trim(),
+      amount:    Number(editForm.amount),
+      dueDay:    Number(editForm.dueDay),
+      isAutopay: editForm.isAutopay,
+      account:   editForm.account || null,
+    })
+    // Update this month's record amount and account
+    const record = records[editBill.id]
+    if (record) {
+      await updateDoc(doc(db, 'billRecords', record.id), {
+        billName: editForm.name.trim(),
+        amount:   Number(editForm.amount),
+        dueDay:   Number(editForm.dueDay),
+        account:  editForm.account || null,
+        status:   editForm.isAutopay ? (record.status === 'unpaid' ? 'autopay' : record.status) : record.status,
+      })
+      setRecords((prev) => ({
+        ...prev,
+        [editBill.id]: {
+          ...prev[editBill.id],
+          billName: editForm.name.trim(),
+          amount:   Number(editForm.amount),
+          dueDay:   Number(editForm.dueDay),
+          account:  editForm.account || null,
+          status:   editForm.isAutopay ? (record.status === 'unpaid' ? 'autopay' : record.status) : record.status,
+        },
+      }))
+    }
+    setEditBill(null)
+    setSaving(false)
+  }
+
   const handleDeleteBill = async (billId) => {
     await deleteDoc(doc(db, 'bills', billId))
   }
 
-  // Summary totals
+  // Summary — use effective status for accurate totals
   const billsWithRecords = bills.map((b) => ({ ...b, record: records[b.id] }))
-  const totalDue  = billsWithRecords.reduce((s, b) => s + Number(b.record?.amount || b.amount), 0)
-  const totalPaid = billsWithRecords.filter((b) => b.record?.status !== 'unpaid').reduce((s, b) => s + Number(b.record?.amount || b.amount), 0)
+  const isEffectivelyPaid = (b) => {
+    const eff = effectiveStatus(b, b.record, year, month)
+    return eff !== 'unpaid' && eff !== 'scheduled'
+  }
+  const totalDue    = billsWithRecords.reduce((s, b) => s + Number(b.record?.amount || b.amount), 0)
+  const totalPaid   = billsWithRecords.filter(isEffectivelyPaid).reduce((s, b) => s + Number(b.record?.amount || b.amount), 0)
   const totalUnpaid = totalDue - totalPaid
 
-  const unpaidBills = billsWithRecords.filter((b) => b.record?.status === 'unpaid')
-  const paidBills   = billsWithRecords.filter((b) => b.record?.status !== 'unpaid')
+  const unpaidBills = billsWithRecords.filter((b) => !isEffectivelyPaid(b))
+  const paidBills   = billsWithRecords.filter(isEffectivelyPaid)
 
   if (roleLoading) return null
 
@@ -218,7 +294,7 @@ export default function Bills() {
           <div className="empty-state" style={{ padding: '1.5rem 0' }}>No bills yet — add your first one!</div>
         )}
 
-        {/* Unpaid bills */}
+        {/* Unpaid / scheduled bills */}
         {unpaidBills.length > 0 && (
           <>
             <div className="section-label">Unpaid · {unpaidBills.length}</div>
@@ -226,12 +302,14 @@ export default function Bills() {
               <BillRow
                 key={bill.id}
                 bill={bill}
+                effStatus={effectiveStatus(bill, bill.record, year, month)}
                 isLast={i === unpaidBills.length - 1 && paidBills.length === 0}
                 year={year} month={month}
                 isAdmin={isAdmin}
                 onCycle={cycleStatus}
                 onNote={(id, current) => { setShowNoteFor(id); setNoteText(current || '') }}
                 onDelete={handleDeleteBill}
+                onEdit={openEdit}
               />
             ))}
           </>
@@ -247,12 +325,14 @@ export default function Bills() {
               <BillRow
                 key={bill.id}
                 bill={bill}
+                effStatus={effectiveStatus(bill, bill.record, year, month)}
                 isLast={i === paidBills.length - 1}
                 year={year} month={month}
                 isAdmin={isAdmin}
                 onCycle={cycleStatus}
                 onNote={(id, current) => { setShowNoteFor(id); setNoteText(current || '') }}
                 onDelete={handleDeleteBill}
+                onEdit={openEdit}
               />
             ))}
           </>
@@ -314,15 +394,24 @@ export default function Bills() {
               />
             </div>
 
+            <select
+              className="form-select"
+              style={{ width: '100%', marginBottom: '10px' }}
+              value={billForm.account}
+              onChange={(e) => setBillForm({ ...billForm, account: e.target.value })}
+            >
+              {ACCOUNTS.map((a) => <option key={a}>{a}</option>)}
+            </select>
+
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
               <input
                 type="checkbox"
-                id="autopay"
+                id="autopay-add"
                 checked={billForm.isAutopay}
                 onChange={(e) => setBillForm({ ...billForm, isAutopay: e.target.checked })}
                 style={{ width: 16, height: 16, cursor: 'pointer' }}
               />
-              <label htmlFor="autopay" style={{ fontSize: '13px', color: '#555', cursor: 'pointer' }}>
+              <label htmlFor="autopay-add" style={{ fontSize: '13px', color: '#555', cursor: 'pointer' }}>
                 This bill is on autopay
               </label>
             </div>
@@ -338,23 +427,99 @@ export default function Bills() {
           </div>
         </div>
       )}
+
+      {/* Edit bill modal */}
+      {editBill && (
+        <div className="modal-overlay" onClick={() => setEditBill(null)}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+            <h2 className="modal-title">Edit bill</h2>
+
+            <input
+              className="form-input"
+              placeholder="Bill name"
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              autoFocus
+            />
+            <div className="form-row">
+              <input
+                className="form-input"
+                style={{ margin: 0 }}
+                type="number"
+                placeholder="Amount $"
+                value={editForm.amount}
+                onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+              />
+              <input
+                className="form-input"
+                style={{ margin: 0 }}
+                type="number"
+                placeholder="Due day (1–31)"
+                min="1" max="31"
+                value={editForm.dueDay}
+                onChange={(e) => setEditForm({ ...editForm, dueDay: e.target.value })}
+              />
+            </div>
+
+            <select
+              className="form-select"
+              style={{ width: '100%', marginBottom: '10px' }}
+              value={editForm.account}
+              onChange={(e) => setEditForm({ ...editForm, account: e.target.value })}
+            >
+              {ACCOUNTS.map((a) => <option key={a}>{a}</option>)}
+            </select>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <input
+                type="checkbox"
+                id="autopay-edit"
+                checked={editForm.isAutopay}
+                onChange={(e) => setEditForm({ ...editForm, isAutopay: e.target.checked })}
+                style={{ width: 16, height: 16, cursor: 'pointer' }}
+              />
+              <label htmlFor="autopay-edit" style={{ fontSize: '13px', color: '#555', cursor: 'pointer' }}>
+                This bill is on autopay
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => { handleDeleteBill(editBill.id); setEditBill(null) }}
+                style={{ background: 'none', border: '0.5px solid #f5c5c5', borderRadius: '8px', padding: '9px 14px', fontSize: '13px', color: '#c0392b', cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Remove
+              </button>
+              <button
+                className="btn-primary"
+                style={{ flex: 1, margin: 0, background: '#BA7517' }}
+                onClick={handleEditSave}
+                disabled={saving || !editForm.name.trim() || !editForm.amount || !editForm.dueDay}
+              >
+                {saving ? 'Saving...' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function BillRow({ bill, isLast, year, month, isAdmin, onCycle, onNote, onDelete }) {
-  const record  = bill.record
-  const status  = record?.status || 'unpaid'
-  const styles  = STATUS_STYLES[status]
-  const amount  = record?.amount ?? bill.amount
-  const notes   = record?.notes || ''
-  const isPaid  = status !== 'unpaid'
+function BillRow({ bill, effStatus, isLast, year, month, isAdmin, onCycle, onNote, onDelete, onEdit }) {
+  const record = bill.record
+  const styles = STATUS_STYLES[effStatus] || STATUS_STYLES.unpaid
+  const amount = record?.amount ?? bill.amount
+  const notes  = record?.notes || ''
+  const isPaid = effStatus !== 'unpaid' && effStatus !== 'scheduled'
 
-  // Due date label
-  const dueDay = bill.dueDay
+  const dueDay  = bill.dueDay
   const dueDate = dueDay
     ? new Date(year, month, dueDay).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : null
+
+  const account = record?.account || bill.account
 
   return (
     <div style={{
@@ -386,9 +551,14 @@ function BillRow({ bill, isLast, year, month, isAdmin, onCycle, onNote, onDelete
           <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', ...styles.badge }}>
             {styles.label}
           </span>
-          {!isPaid && dueDate && (
+          {dueDate && (
             <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', background: '#FAEEDA', color: '#854F0B' }}>
-              Due {dueDate}
+              {isPaid ? '' : 'Due '}{dueDate}
+            </span>
+          )}
+          {account && (
+            <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', background: '#f0ede8', color: '#666' }}>
+              {account}
             </span>
           )}
         </div>
@@ -413,10 +583,10 @@ function BillRow({ bill, isLast, year, month, isAdmin, onCycle, onNote, onDelete
         <div style={{ fontSize: '13px', fontWeight: 500 }}>${fmt(amount)}</div>
         {isAdmin && (
           <button
-            onClick={() => onDelete(bill.id)}
-            style={{ fontSize: '10px', color: '#ddd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', marginTop: '3px' }}
+            onClick={() => onEdit(bill)}
+            style={{ fontSize: '10px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', marginTop: '3px' }}
           >
-            Remove
+            Edit
           </button>
         )}
       </div>
