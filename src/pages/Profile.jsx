@@ -60,6 +60,9 @@ export default function Profile() {
     const [routines, setRoutines] = useState([])
     // modalRoutine: null = closed | { frequency, id?, text } = open
     const [modalRoutine, setModalRoutine] = useState(null)
+    const [workProjects, setWorkProjects] = useState([])
+    // workModal: null = closed | { id?, name } = open
+    const [workModal, setWorkModal] = useState(null)
 
     // Load current user's profile
     useEffect(() => {
@@ -114,6 +117,15 @@ export default function Profile() {
         })
     }, [user])
 
+    // Real-time work projects for current user
+    useEffect(() => {
+        if (!user) return
+        const q = query(collection(db, 'users', user.uid, 'workProjects'), orderBy('createdAt'))
+        return onSnapshot(q, (snap) => {
+            setWorkProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        })
+    }, [user])
+
     const saveNickname = async () => {
         if (!nickname.trim() || !user) return
         setSaving(true)
@@ -146,6 +158,30 @@ export default function Profile() {
         if (!user) return
         await deleteDoc(doc(db, 'users', user.uid, 'routines', id))
         setModalRoutine(null)
+    }
+
+    const saveWorkProject = async () => {
+        if (!workModal?.name?.trim() || !user) return
+        const payload = {
+            name:      workModal.name.trim(),
+            startDate: workModal.startDate || null,
+            endDate:   workModal.endDate   || null,
+        }
+        if (workModal.id) {
+            await updateDoc(doc(db, 'users', user.uid, 'workProjects', workModal.id), payload)
+        } else {
+            await addDoc(collection(db, 'users', user.uid, 'workProjects'), {
+                ...payload,
+                createdAt: serverTimestamp(),
+            })
+        }
+        setWorkModal(null)
+    }
+
+    const deleteWorkProject = async (id) => {
+        if (!user) return
+        await deleteDoc(doc(db, 'users', user.uid, 'workProjects', id))
+        setWorkModal(null)
     }
 
     const avatarStyle = COLOR_STYLES[profile?.color] || COLOR_STYLES.teal
@@ -269,6 +305,39 @@ export default function Profile() {
             </div>
 
 
+            {/* Work Projects */}
+            <div className="profile-card" style={{ marginBottom: '12px' }}>
+                <div className="profile-section-title">My Work Projects</div>
+                {workProjects.length === 0 && (
+                    <div style={{ fontSize: '12px', color: '#ccc', marginBottom: '6px' }}>No projects yet</div>
+                )}
+                {workProjects.map((p) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#d0cdc8', flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '13px' }}>{p.name}</div>
+                            {(p.startDate || p.endDate) && (
+                                <div style={{ fontSize: '11px', color: '#bbb', marginTop: '2px' }}>
+                                    {p.startDate || '—'} → {p.endDate || '—'}
+                                </div>
+                            )}
+                        </div>
+                        <button
+                            onClick={() => setWorkModal({ id: p.id, name: p.name, startDate: p.startDate || '', endDate: p.endDate || '' })}
+                            style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                        >
+                            Edit
+                        </button>
+                    </div>
+                ))}
+                <button
+                    onClick={() => setWorkModal({ name: '', startDate: '', endDate: '' })}
+                    style={{ fontSize: '12px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
+                >
+                    + Add project
+                </button>
+            </div>
+
             {/* Household members */}
             <div className="profile-card" style={{ marginBottom: '12px' }}>
                 <div className="profile-section-title">Household members</div>
@@ -300,6 +369,63 @@ export default function Profile() {
             <button className="btn-signout" onClick={logOut}>
                 Sign out
             </button>
+
+            {/* Work project add / edit modal */}
+            {workModal && (
+                <div className="modal-overlay" onClick={() => setWorkModal(null)}>
+                    <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-handle" />
+                        <h2 className="modal-title">{workModal.id ? 'Edit project' : 'Add project'}</h2>
+                        <input
+                            className="form-input"
+                            placeholder="e.g. Client portal, Q3 campaign"
+                            value={workModal.name}
+                            onChange={(e) => setWorkModal({ ...workModal, name: e.target.value })}
+                            autoFocus
+                        />
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '11px', fontWeight: 500, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Start date</div>
+                                <input
+                                    className="form-input"
+                                    style={{ margin: 0 }}
+                                    type="date"
+                                    value={workModal.startDate}
+                                    onChange={(e) => setWorkModal({ ...workModal, startDate: e.target.value })}
+                                />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '11px', fontWeight: 500, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>End date</div>
+                                <input
+                                    className="form-input"
+                                    style={{ margin: 0 }}
+                                    type="date"
+                                    value={workModal.endDate}
+                                    onChange={(e) => setWorkModal({ ...workModal, endDate: e.target.value })}
+                                />
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            {workModal.id && (
+                                <button
+                                    onClick={() => deleteWorkProject(workModal.id)}
+                                    style={{ background: 'none', border: '0.5px solid #f5c5c5', borderRadius: '8px', padding: '9px 14px', fontSize: '13px', color: '#c0392b', cursor: 'pointer', fontFamily: 'inherit' }}
+                                >
+                                    Delete
+                                </button>
+                            )}
+                            <button
+                                className="btn-primary"
+                                style={{ flex: 1, margin: 0 }}
+                                onClick={saveWorkProject}
+                                disabled={!workModal.name?.trim()}
+                            >
+                                {workModal.id ? 'Save changes' : 'Add project'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Routine add / edit modal */}
             {modalRoutine && (

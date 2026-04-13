@@ -19,6 +19,7 @@ import Loan from './pages/finances/LoanTracking'
 import Bills from './pages/finances/MonthlyBills'
 import Spending from './pages/finances/SpendingTracking'
 import Work from './pages/Work/WorkHome'
+import WorkProject from './pages/Work/WorkProject'
 
 function App() {
   return (
@@ -50,6 +51,7 @@ function App() {
                       <Route path="/finances/bills" element={<Bills />} />
                       <Route path="/finances/spending" element={<Spending />} />
                       <Route path="/work" element={<Work />} />
+                      <Route path="/work/:projectId" element={<WorkProject />} />
                     </Routes>
                   </main>
                 </div>

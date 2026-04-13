@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { db } from '../firebase'
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore'
 
 const navItems = [
   {
@@ -111,8 +113,23 @@ export default function Navbar() {
   const { user, logOut } = useAuth()
 
   const [openDropdown, setOpenDropdown] = useState(null)
-  const toggleDropdown = (label) =>
-    setOpenDropdown(label)
+  const [workProjects, setWorkProjects] = useState([])
+
+  const toggleDropdown = (label) => setOpenDropdown(label)
+
+  useEffect(() => {
+    if (!user) return
+    const q = query(collection(db, 'users', user.uid, 'workProjects'), orderBy('createdAt'))
+    return onSnapshot(q, (snap) => {
+      setWorkProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [user])
+
+  const items = navItems.map((item) =>
+    item.label === 'Work'
+      ? { ...item, children: workProjects.length > 0 ? workProjects.map((p) => ({ to: `/work/${p.id}`, label: p.name })) : undefined }
+      : item
+  )
 
 
 
@@ -124,7 +141,7 @@ export default function Navbar() {
       <header className="desktop-nav">
         <div className="desktop-nav-logo">Mountain<span>Flax</span></div>
         <nav className="desktop-nav-links" >
-          {navItems.map((item) =>
+          {items.map((item) =>
             item.children ? (
               <div key={item.label} className="desktop-nav-dropdown"
                 onMouseEnter={() => toggleDropdown(item.label)}
@@ -169,7 +186,7 @@ export default function Navbar() {
 
       {/* Mobile bottom bar — keep exactly the same as before */}
       <nav className="mobile-nav">
-        {navItems.map((item) => (
+        {items.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
