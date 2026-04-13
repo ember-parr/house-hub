@@ -2,9 +2,12 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import {
-    doc, getDoc, updateDoc,
+    doc, getDoc, updateDoc, addDoc, deleteDoc,
     collection, getDocs, query, orderBy, onSnapshot,
+    serverTimestamp,
 } from 'firebase/firestore'
+
+const FREQUENCIES = ['daily', 'weekly', 'monthly']
 
 const COLOR_STYLES = {
     teal: { bg: '#E1F5EE', color: '#0F6E56' },
@@ -54,6 +57,9 @@ export default function Profile() {
         todosAssigned: 0, todosComplete: 0,
         shoppingAdded: 0, shoppingBought: 0,
     })
+    const [routines, setRoutines] = useState([])
+    // modalRoutine: null = closed | { frequency, id?, text } = open
+    const [modalRoutine, setModalRoutine] = useState(null)
 
     // Load current user's profile
     useEffect(() => {
@@ -96,6 +102,18 @@ export default function Profile() {
         return () => { unsubTodos(); unsubShopping() }
     }, [user])
 
+    // Real-time routines for current user
+    useEffect(() => {
+        if (!user) return
+        const q = query(
+            collection(db, 'users', user.uid, 'routines'),
+            orderBy('createdAt')
+        )
+        return onSnapshot(q, (snap) => {
+            setRoutines(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        })
+    }, [user])
+
     const saveNickname = async () => {
         if (!nickname.trim() || !user) return
         setSaving(true)
@@ -103,6 +121,31 @@ export default function Profile() {
         setSaving(false)
         setSavedMsg(true)
         setTimeout(() => setSavedMsg(false), 2000)
+    }
+
+    const saveRoutine = async () => {
+        if (!modalRoutine?.text?.trim() || !user) return
+        const isDaily = modalRoutine.frequency === 'daily'
+        if (modalRoutine.id) {
+            await updateDoc(doc(db, 'users', user.uid, 'routines', modalRoutine.id), {
+                text:       modalRoutine.text.trim(),
+                timeOfDay:  isDaily ? (modalRoutine.timeOfDay || 'AM') : null,
+            })
+        } else {
+            await addDoc(collection(db, 'users', user.uid, 'routines'), {
+                text:       modalRoutine.text.trim(),
+                frequency:  modalRoutine.frequency,
+                timeOfDay:  isDaily ? (modalRoutine.timeOfDay || 'AM') : null,
+                createdAt:  serverTimestamp(),
+            })
+        }
+        setModalRoutine(null)
+    }
+
+    const deleteRoutine = async (id) => {
+        if (!user) return
+        await deleteDoc(doc(db, 'users', user.uid, 'routines', id))
+        setModalRoutine(null)
     }
 
     const avatarStyle = COLOR_STYLES[profile?.color] || COLOR_STYLES.teal
@@ -182,6 +225,50 @@ export default function Profile() {
                 </div>
             </div>
 
+            
+
+            {/* Routines */}
+            <div className="profile-card" style={{ marginBottom: '12px' }}>
+                <div className="profile-section-title">My Routines</div>
+                {FREQUENCIES.map((freq) => {
+                    const items = routines.filter((r) => r.frequency === freq)
+                    return (
+                        <div key={freq} style={{ marginBottom: '16px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                {freq}
+                            </div>
+                            {items.length === 0 && (
+                                <div style={{ fontSize: '12px', color: '#ccc', marginBottom: '6px' }}>No {freq} routines yet</div>
+                            )}
+                            {items.map((r) => (
+                                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#d0cdc8', flexShrink: 0 }} />
+                                    <div style={{ flex: 1, fontSize: '13px' }}>{r.text}</div>
+                                    {r.timeOfDay && (
+                                        <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E6F1FB', color: '#185FA5' }}>
+                                            {r.timeOfDay}
+                                        </span>
+                                    )}
+                                    <button
+                                        onClick={() => setModalRoutine({ frequency: freq, id: r.id, text: r.text, timeOfDay: r.timeOfDay || 'AM' })}
+                                        style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                                    >
+                                        Edit
+                                    </button>
+                                </div>
+                            ))}
+                            <button
+                                onClick={() => setModalRoutine({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null })}
+                                style={{ fontSize: '12px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
+                            >
+                                + Add {freq} routine
+                            </button>
+                        </div>
+                    )
+                })}
+            </div>
+
+
             {/* Household members */}
             <div className="profile-card" style={{ marginBottom: '12px' }}>
                 <div className="profile-section-title">Household members</div>
@@ -213,6 +300,62 @@ export default function Profile() {
             <button className="btn-signout" onClick={logOut}>
                 Sign out
             </button>
+
+            {/* Routine add / edit modal */}
+            {modalRoutine && (
+                <div className="modal-overlay" onClick={() => setModalRoutine(null)}>
+                    <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-handle" />
+                        <h2 className="modal-title">
+                            {modalRoutine.id ? 'Edit' : 'Add'} {modalRoutine.frequency} routine
+                        </h2>
+                        <input
+                            className="form-input"
+                            placeholder="e.g. Morning walk, Meal prep, Budget review"
+                            value={modalRoutine.text}
+                            onChange={(e) => setModalRoutine({ ...modalRoutine, text: e.target.value })}
+                            onKeyDown={(e) => e.key === 'Enter' && saveRoutine()}
+                            autoFocus
+                        />
+                        {modalRoutine.frequency === 'daily' && (
+                            <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+                                {['AM', 'PM'].map((t) => (
+                                    <button
+                                        key={t}
+                                        onClick={() => setModalRoutine({ ...modalRoutine, timeOfDay: t })}
+                                        style={{
+                                            flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                                            fontFamily: 'inherit', fontSize: '13px', fontWeight: 500,
+                                            background: modalRoutine.timeOfDay === t ? '#185FA5' : '#f0ede8',
+                                            color: modalRoutine.timeOfDay === t ? '#fff' : '#666',
+                                        }}
+                                    >
+                                        {t}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            {modalRoutine.id && (
+                                <button
+                                    onClick={() => deleteRoutine(modalRoutine.id)}
+                                    style={{ background: 'none', border: '0.5px solid #f5c5c5', borderRadius: '8px', padding: '9px 14px', fontSize: '13px', color: '#c0392b', cursor: 'pointer', fontFamily: 'inherit' }}
+                                >
+                                    Delete
+                                </button>
+                            )}
+                            <button
+                                className="btn-primary"
+                                style={{ flex: 1, margin: 0 }}
+                                onClick={saveRoutine}
+                                disabled={!modalRoutine.text?.trim()}
+                            >
+                                {modalRoutine.id ? 'Save changes' : 'Add routine'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

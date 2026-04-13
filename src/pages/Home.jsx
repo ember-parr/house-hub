@@ -39,9 +39,9 @@ const Hubs = [
     ),
   },
   {
-    to: '/other',
-    title: 'Other',
-    subtitle: 'IDK yet...',
+    to: '/work',
+    title: 'Work',
+    subtitle: 'Desk Prison Stuff',
     colorClass: 'card-blue',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

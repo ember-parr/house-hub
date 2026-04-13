@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 
 export default function ListsHome() {
-  const greeting = "Other Stuff"
+  const greeting = "Work Stuff"
 
   return (
     <div className="page">

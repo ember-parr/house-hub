@@ -18,7 +18,7 @@ import Amex from './pages/finances/AmexTracking'
 import Loan from './pages/finances/LoanTracking'
 import Bills from './pages/finances/MonthlyBills'
 import Spending from './pages/finances/SpendingTracking'
-import Other from './pages/other/OtherHome'
+import Work from './pages/Work/WorkHome'
 
 function App() {
   return (
@@ -49,7 +49,7 @@ function App() {
                       <Route path="/finances/loan" element={<Loan />} />
                       <Route path="/finances/bills" element={<Bills />} />
                       <Route path="/finances/spending" element={<Spending />} />
-                      <Route path="/other" element={<Other />} />
+                      <Route path="/work" element={<Work />} />
                     </Routes>
                   </main>
                 </div>
