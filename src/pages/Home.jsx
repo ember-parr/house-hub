@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { db } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import {
-  collection, addDoc, updateDoc, doc, query, orderBy, onSnapshot,
+  collection, getDocs, addDoc, updateDoc, doc, query, orderBy, onSnapshot,
   getDoc, setDoc, deleteField, serverTimestamp,
 } from 'firebase/firestore'
 
@@ -147,6 +147,8 @@ export default function Home() {
   const [hhMonthComps, setHhMonthComps]     = useState({})
   const [hhYearComps, setHhYearComps]       = useState({})
   const [myProfile, setMyProfile]           = useState(null)
+  const [workProjects, setWorkProjects]     = useState([])
+  const [workActionItems, setWorkActionItems] = useState([]) // [{ ...item, projectId, projectName, weekDocId }]
   const [showTodoModal, setShowTodoModal]   = useState(false)
   const [todoTitle, setTodoTitle]           = useState('')
   const [todoCategory, setTodoCategory]     = useState('General')
@@ -200,6 +202,35 @@ export default function Home() {
     })
   }, [user])
 
+  // Work projects
+  useEffect(() => {
+    if (!user) return
+    const q = query(collection(db, 'users', user.uid, 'workProjects'), orderBy('createdAt'))
+    return onSnapshot(q, (snap) => setWorkProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() }))))
+  }, [user])
+
+  // Work action items — scan all weekData docs for each project
+  useEffect(() => {
+    if (!user || workProjects.length === 0) return
+    let cancelled = false
+    const load = async () => {
+      const all = []
+      await Promise.all(workProjects.map(async (p) => {
+        const snap = await getDocs(collection(db, 'users', user.uid, 'workProjects', p.id, 'weekData'))
+        snap.docs.forEach((d) => {
+          ;(d.data().actionItems || []).forEach((item) => {
+            if (item.status !== 'Complete' && item.completeBy && item.completeBy <= tomorrowStr) {
+              all.push({ ...item, projectId: p.id, projectName: p.name, weekDocId: d.id })
+            }
+          })
+        })
+      }))
+      if (!cancelled) setWorkActionItems(all)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [user, workProjects, tomorrowStr])
+
   // ── Derived data ──────────────────────────────────────────────────────────
 
   const dueTasks = todos.filter((t) =>
@@ -242,12 +273,23 @@ export default function Home() {
     .filter((r) => r.frequency === 'quarterly' && !hhYearComps[r.id]?.[curQuarterKey])
     .map((r) => ({ ...r, source: 'household' }))
 
-  const hasAnyTasks    = dueTasks.length > 0
+  const hasAnyTasks    = dueTasks.length > 0 || workActionItems.length > 0
   const hasAnyRoutines = pendingDaily.length + pendingWeekly.length + pendingMonthly.length + pendingQuarterly.length > 0
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
   const markTaskDone = (id) => updateDoc(doc(db, 'todos', id), { status: 'Complete' })
+
+  const markWorkItemDone = async (item) => {
+    const weekRef = doc(db, 'users', user.uid, 'workProjects', item.projectId, 'weekData', item.weekDocId)
+    const snap = await getDoc(weekRef)
+    if (!snap.exists()) return
+    const items = (snap.data().actionItems || []).map((i) =>
+      i.id === item.id ? { ...i, status: 'Complete' } : i
+    )
+    await setDoc(weekRef, { actionItems: items }, { merge: true })
+    setWorkActionItems((prev) => prev.filter((i) => !(i.id === item.id && i.projectId === item.projectId)))
+  }
 
   const togglePersonalRoutine = async (routineId, ck) => {
     const current = personalComps[routineId]?.[ck] || false
@@ -410,6 +452,35 @@ export default function Home() {
               ))}
             </div>
           ))}
+
+          {workActionItems.length > 0 && (
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', marginTop: '10px' }}>
+                Work Projects
+              </div>
+              {workActionItems.map((item) => (
+                <div key={`${item.projectId}-${item.id}`} className="task-card" style={{ marginBottom: '6px' }}>
+                  <button
+                    className="task-check"
+                    onClick={() => markWorkItemDone(item)}
+                    aria-label="Mark complete"
+                  />
+                  <div className="task-body">
+                    <div className="task-title">{item.title}</div>
+                    <div className="task-meta">
+                      <span style={{ fontSize: '10px', color: '#aaa' }}>{item.projectName}</span>
+                      <span style={{
+                        fontSize: '10px', fontWeight: 500,
+                        color: item.completeBy < todayStr ? '#993C1D' : item.completeBy === todayStr ? '#534AB7' : '#888',
+                      }}>
+                        {item.completeBy < todayStr ? 'Overdue' : item.completeBy === todayStr ? 'Today' : 'Tomorrow'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
