@@ -40,6 +40,9 @@ function nameInitials(name) {
 }
 
 const HH_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'annual']
+const HH_ROOMS = ['Kitchen', 'Living Room', 'Primary Bedroom', 'Primary Bathroom', 'Entryway',
+  'Stairs', 'Loft', 'Ember Office', 'Justin Office', 'Aiden Room', 'Laundry Room', 
+  'Upstairs Bath', 'Guest Bathroom', 'Guest Bedroom', 'Garage', 'Outdoor', 'Basement', 'Other']
 
 export default function Routines() {
   const { user } = useAuth()
@@ -193,12 +196,14 @@ export default function Routines() {
       await updateDoc(doc(db, 'householdRoutines', hhModal.id), {
         text:      hhModal.text.trim(),
         timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
+        room:      hhModal.room || null,
       })
     } else {
       await addDoc(collection(db, 'householdRoutines'), {
         text:      hhModal.text.trim(),
         frequency: hhModal.frequency,
         timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
+        room:      hhModal.room || null,
         createdAt: serverTimestamp(),
       })
     }
@@ -258,6 +263,201 @@ export default function Routines() {
   }
 
   const hasAny = routines.length > 0
+
+  // Rooms that actually have routines, in HH_ROOMS order
+  const trackerRooms = HH_ROOMS.filter((room) => hhRoutines.some((r) => r.room === room))
+  const trackerUnassigned = hhRoutines.filter((r) => !r.room)
+
+  const renderTrackerGroup = (groupItems) => {
+    const quarterKeys = ['Q1', 'Q2', 'Q3', 'Q4']
+    return HH_FREQUENCIES.map((freq) => {
+      let freqItems = groupItems.filter((r) => r.frequency === freq)
+      if (freq === 'daily') {
+        freqItems = [...freqItems].sort((a, b) => {
+          const order = { AM: 0, PM: 1, null: 2 }
+          return (order[a.timeOfDay] ?? 2) - (order[b.timeOfDay] ?? 2)
+        })
+      }
+      if (freqItems.length === 0) return null
+
+      return (
+        <div key={freq} style={{ marginBottom: '18px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 600, color: '#ccc', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '8px' }}>
+            {freq}
+          </div>
+
+          {freqItems.map((r) => {
+            // ── Daily ──
+            if (freq === 'daily') {
+              const frac = trackerFraction(r.id, days, (d) => String(d))
+              return (
+                <div key={r.id} style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                    {r.timeOfDay && (
+                      <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E6F1FB', color: '#185FA5' }}>
+                        {r.timeOfDay}
+                      </span>
+                    )}
+                    <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {Array.from({ length: days }, (_, i) => i + 1).map((d) => {
+                      const tracked = getTracked(r.id, String(d))
+                      const isToday = isCurrentMonth && d === today
+                      const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+                      return (
+                        <button
+                          key={d}
+                          onClick={() => toggleTracker(r.id, String(d))}
+                          style={{
+                            width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                            border: tracked ? 'none' : isToday ? '1.5px solid #534AB7' : '0.5px solid #e0ddd8',
+                            background: tracked ? cStyle.bg : 'white',
+                            color: tracked ? cStyle.color : isToday ? '#534AB7' : '#888',
+                            fontSize: tracked ? 8 : 11,
+                            fontWeight: tracked || isToday ? 600 : 400,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >
+                          {tracked ? tracked.initials : d}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            }
+
+            // ── Weekly ──
+            if (freq === 'weekly') {
+              const frac = trackerFraction(r.id, weeks, (w) => String(w))
+              return (
+                <div key={r.id} style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                    <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {Array.from({ length: weeks }, (_, i) => i + 1).map((w) => {
+                      const tracked    = getTracked(r.id, String(w))
+                      const isThisWeek = isCurrentMonth && w === Math.ceil(today / 7)
+                      const cStyle     = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+                      return (
+                        <button
+                          key={w}
+                          onClick={() => toggleTracker(r.id, String(w))}
+                          style={{
+                            flex: 1, height: 32, borderRadius: 8,
+                            border: tracked ? 'none' : isThisWeek ? '1.5px solid #1D9E75' : '0.5px solid #e0ddd8',
+                            background: tracked ? cStyle.bg : 'white',
+                            color: tracked ? cStyle.color : isThisWeek ? '#1D9E75' : '#888',
+                            fontSize: 11, fontWeight: tracked || isThisWeek ? 600 : 400,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                          }}
+                        >
+                          {tracked ? tracked.initials : `Wk ${w}`}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            }
+
+            // ── Monthly ──
+            if (freq === 'monthly') {
+              const tracked = getTracked(r.id, 'done')
+              const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+              return (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                  <button
+                    onClick={() => toggleTracker(r.id, 'done')}
+                    style={{
+                      width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                      border: tracked ? 'none' : '0.5px solid #e0ddd8',
+                      background: tracked ? cStyle.bg : 'white',
+                      color: tracked ? cStyle.color : '#aaa',
+                      fontSize: 9, fontWeight: 600,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {tracked ? tracked.initials : ''}
+                  </button>
+                  <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                </div>
+              )
+            }
+
+            // ── Quarterly ──
+            if (freq === 'quarterly') {
+              const frac = trackerFractionYear(r.id, quarterKeys)
+              return (
+                <div key={r.id} style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                    <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {quarterKeys.map((qk, qi) => {
+                      const tracked   = getTrackedYear(r.id, qk)
+                      const isCurrent = isCurrentYear && (qi + 1) === currentQuarter
+                      const cStyle    = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+                      return (
+                        <button
+                          key={qk}
+                          onClick={() => toggleTrackerYear(r.id, qk)}
+                          style={{
+                            flex: 1, height: 32, borderRadius: 8,
+                            border: tracked ? 'none' : isCurrent ? '1.5px solid #185FA5' : '0.5px solid #e0ddd8',
+                            background: tracked ? cStyle.bg : 'white',
+                            color: tracked ? cStyle.color : isCurrent ? '#185FA5' : '#888',
+                            fontSize: 11, fontWeight: tracked || isCurrent ? 600 : 400,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                          }}
+                        >
+                          {tracked ? tracked.initials : qk}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            }
+
+            // ── Annual ──
+            if (freq === 'annual') {
+              const tracked = getTrackedYear(r.id, 'done')
+              const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+              return (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                  <button
+                    onClick={() => toggleTrackerYear(r.id, 'done')}
+                    style={{
+                      width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                      border: tracked ? 'none' : '0.5px solid #e0ddd8',
+                      background: tracked ? cStyle.bg : 'white',
+                      color: tracked ? cStyle.color : '#aaa',
+                      fontSize: 9, fontWeight: 600,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {tracked ? tracked.initials : ''}
+                  </button>
+                  <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                </div>
+              )
+            }
+
+            return null
+          })}
+        </div>
+      )
+    })
+  }
 
   return (
     <div className="page">
@@ -454,188 +654,21 @@ export default function Routines() {
             </div>
           )}
 
-          {HH_FREQUENCIES.map((freq) => {
-            const items = hhByFreq(freq)
-            if (items.length === 0) return null
-            const quarterKeys = ['Q1', 'Q2', 'Q3', 'Q4']
+          {/* Unassigned (no room) */}
+          {trackerUnassigned.length > 0 && renderTrackerGroup(trackerUnassigned)}
 
-            return (
-              <div key={freq} style={{ marginBottom: '20px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
-                  {freq}
-                </div>
-
-                {items.map((r) => {
-                  // ── Daily ──
-                  if (freq === 'daily') {
-                    const frac = trackerFraction(r.id, days, (d) => String(d))
-                    return (
-                      <div key={r.id} style={{ marginBottom: '14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
-                          {r.timeOfDay && (
-                            <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E6F1FB', color: '#185FA5' }}>
-                              {r.timeOfDay}
-                            </span>
-                          )}
-                          <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                          {Array.from({ length: days }, (_, i) => i + 1).map((d) => {
-                            const tracked = getTracked(r.id, String(d))
-                            const isToday = isCurrentMonth && d === today
-                            const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
-                            return (
-                              <button
-                                key={d}
-                                onClick={() => toggleTracker(r.id, String(d))}
-                                style={{
-                                  width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                                  border: tracked ? 'none' : isToday ? '1.5px solid #534AB7' : '0.5px solid #e0ddd8',
-                                  background: tracked ? cStyle.bg : 'white',
-                                  color: tracked ? cStyle.color : isToday ? '#534AB7' : '#888',
-                                  fontSize: tracked ? 8 : 11,
-                                  fontWeight: tracked || isToday ? 600 : 400,
-                                  cursor: 'pointer', fontFamily: 'inherit',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                }}
-                              >
-                                {tracked ? tracked.initials : d}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  // ── Weekly ──
-                  if (freq === 'weekly') {
-                    const frac = trackerFraction(r.id, weeks, (w) => String(w))
-                    return (
-                      <div key={r.id} style={{ marginBottom: '14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
-                          <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          {Array.from({ length: weeks }, (_, i) => i + 1).map((w) => {
-                            const tracked    = getTracked(r.id, String(w))
-                            const isThisWeek = isCurrentMonth && w === Math.ceil(today / 7)
-                            const cStyle     = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
-                            return (
-                              <button
-                                key={w}
-                                onClick={() => toggleTracker(r.id, String(w))}
-                                style={{
-                                  flex: 1, height: 32, borderRadius: 8,
-                                  border: tracked ? 'none' : isThisWeek ? '1.5px solid #1D9E75' : '0.5px solid #e0ddd8',
-                                  background: tracked ? cStyle.bg : 'white',
-                                  color: tracked ? cStyle.color : isThisWeek ? '#1D9E75' : '#888',
-                                  fontSize: 11, fontWeight: tracked || isThisWeek ? 600 : 400,
-                                  cursor: 'pointer', fontFamily: 'inherit',
-                                }}
-                              >
-                                {tracked ? tracked.initials : `Wk ${w}`}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  // ── Monthly ──
-                  if (freq === 'monthly') {
-                    const tracked = getTracked(r.id, 'done')
-                    const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
-                    return (
-                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
-                        <button
-                          onClick={() => toggleTracker(r.id, 'done')}
-                          style={{
-                            width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                            border: tracked ? 'none' : '0.5px solid #e0ddd8',
-                            background: tracked ? cStyle.bg : 'white',
-                            color: tracked ? cStyle.color : '#aaa',
-                            fontSize: 9, fontWeight: 600,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', fontFamily: 'inherit',
-                          }}
-                        >
-                          {tracked ? tracked.initials : ''}
-                        </button>
-                        <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
-                      </div>
-                    )
-                  }
-
-                  // ── Quarterly ──
-                  if (freq === 'quarterly') {
-                    const frac = trackerFractionYear(r.id, quarterKeys)
-                    return (
-                      <div key={r.id} style={{ marginBottom: '14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
-                          <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          {quarterKeys.map((qk, qi) => {
-                            const tracked    = getTrackedYear(r.id, qk)
-                            const isCurrent  = isCurrentYear && (qi + 1) === currentQuarter
-                            const cStyle     = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
-                            return (
-                              <button
-                                key={qk}
-                                onClick={() => toggleTrackerYear(r.id, qk)}
-                                style={{
-                                  flex: 1, height: 32, borderRadius: 8,
-                                  border: tracked ? 'none' : isCurrent ? '1.5px solid #185FA5' : '0.5px solid #e0ddd8',
-                                  background: tracked ? cStyle.bg : 'white',
-                                  color: tracked ? cStyle.color : isCurrent ? '#185FA5' : '#888',
-                                  fontSize: 11, fontWeight: tracked || isCurrent ? 600 : 400,
-                                  cursor: 'pointer', fontFamily: 'inherit',
-                                }}
-                              >
-                                {tracked ? tracked.initials : qk}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  // ── Annual ──
-                  if (freq === 'annual') {
-                    const tracked = getTrackedYear(r.id, 'done')
-                    const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
-                    return (
-                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
-                        <button
-                          onClick={() => toggleTrackerYear(r.id, 'done')}
-                          style={{
-                            width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                            border: tracked ? 'none' : '0.5px solid #e0ddd8',
-                            background: tracked ? cStyle.bg : 'white',
-                            color: tracked ? cStyle.color : '#aaa',
-                            fontSize: 9, fontWeight: 600,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', fontFamily: 'inherit',
-                          }}
-                        >
-                          {tracked ? tracked.initials : ''}
-                        </button>
-                        <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
-                      </div>
-                    )
-                  }
-
-                  return null
-                })}
+          {/* Per-room groups */}
+          {trackerRooms.map((room) => (
+            <div key={room} style={{ marginBottom: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', marginTop: '4px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#854F0B', background: '#FAEEDA', padding: '3px 10px', borderRadius: '20px' }}>
+                  {room}
+                </span>
+                <div style={{ flex: 1, height: '0.5px', background: '#f0ede8' }} />
               </div>
-            )
-          })}
+              {renderTrackerGroup(hhRoutines.filter((r) => r.room === room))}
+            </div>
+          ))}
         </div>
       )}
 
@@ -676,9 +709,14 @@ export default function Routines() {
                             {r.timeOfDay}
                           </span>
                         )}
+                        {r.room && (
+                          <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#FAEEDA', color: '#854F0B' }}>
+                            {r.room}
+                          </span>
+                        )}
                         {canEdit && (
                           <button
-                            onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text, timeOfDay: r.timeOfDay || 'AM' })}
+                            onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text, timeOfDay: r.timeOfDay || 'AM', room: r.room || '' })}
                             style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
                           >
                             Edit
@@ -688,7 +726,7 @@ export default function Routines() {
                     ))}
                     {canCreate && (
                       <button
-                        onClick={() => setHhModal({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null })}
+                        onClick={() => setHhModal({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null, room: '' })}
                         style={{ fontSize: '12px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
                       >
                         + Add {freq} routine
@@ -718,6 +756,25 @@ export default function Routines() {
               onKeyDown={(e) => e.key === 'Enter' && saveHhRoutine()}
               autoFocus
             />
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 500, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Room (optional)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {HH_ROOMS.map((room) => (
+                  <button
+                    key={room}
+                    onClick={() => setHhModal({ ...hhModal, room: hhModal.room === room ? '' : room })}
+                    style={{
+                      padding: '5px 10px', borderRadius: '20px', border: 'none', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: '12px', fontWeight: 500,
+                      background: hhModal.room === room ? '#FAEEDA' : '#f0ede8',
+                      color: hhModal.room === room ? '#854F0B' : '#888',
+                    }}
+                  >
+                    {room}
+                  </button>
+                ))}
+              </div>
+            </div>
             {hhModal.frequency === 'daily' && (
               <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
                 {['AM', 'PM'].map((t) => (
