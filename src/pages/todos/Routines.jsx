@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
+import { useUserRole } from '../../hooks/useUserRole'
 import {
   collection, doc, query, orderBy,
   onSnapshot, setDoc, getDoc,
+  addDoc, updateDoc, deleteDoc, serverTimestamp,
 } from 'firebase/firestore'
 
 function monthKey(year, month) {
@@ -23,18 +25,35 @@ function weeksInMonth(year, month) {
   return Math.ceil(daysInMonth(year, month) / 7)
 }
 
+const HH_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'annual']
+
 export default function Routines() {
   const { user } = useAuth()
+  const { isAdmin, isContributor } = useUserRole()
   const now = new Date()
-  const [year, setYear]           = useState(now.getFullYear())
-  const [month, setMonth]         = useState(now.getMonth())
-  const [routines, setRoutines]   = useState([])
+  const [year, setYear]   = useState(now.getFullYear())
+  const [month, setMonth] = useState(now.getMonth())
+
+  // Personal routines
+  const [routines, setRoutines]       = useState([])
   const [completions, setCompletions] = useState({})
-  const [collapsed, setCollapsed] = useState(true)
+  const [collapsed, setCollapsed]     = useState(true)
 
-  const key = monthKey(year, month)
+  // Household routines
+  const [hhCollapsed, setHhCollapsed]             = useState(true)
+  const [hhRoutines, setHhRoutines]               = useState([])
+  const [hhCompletions, setHhCompletions]         = useState({})
+  const [hhYearCompletions, setHhYearCompletions] = useState({})
+  const [hhModal, setHhModal]                     = useState(null)
 
-  // Real-time routines
+  const key     = monthKey(year, month)
+  const yearKey = String(year)
+
+  const canSeeHousehold = isAdmin || isContributor
+  const canCreate       = isAdmin || isContributor
+  const canEdit         = isAdmin
+
+  // Personal routines — real-time
   useEffect(() => {
     if (!user) return
     const q = query(collection(db, 'users', user.uid, 'routines'), orderBy('createdAt'))
@@ -43,7 +62,7 @@ export default function Routines() {
     })
   }, [user])
 
-  // Load completions for current month
+  // Personal completions for current month
   useEffect(() => {
     if (!user) return
     const load = async () => {
@@ -53,6 +72,32 @@ export default function Routines() {
     load()
   }, [user, key])
 
+  // Household routines — real-time
+  useEffect(() => {
+    const q = query(collection(db, 'householdRoutines'), orderBy('createdAt'))
+    return onSnapshot(q, (snap) => {
+      setHhRoutines(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [])
+
+  // Household completions for current month (daily / weekly / monthly)
+  useEffect(() => {
+    const load = async () => {
+      const snap = await getDoc(doc(db, 'householdRoutineCompletions', key))
+      setHhCompletions(snap.exists() ? snap.data() : {})
+    }
+    load()
+  }, [key])
+
+  // Household year completions (quarterly / annual)
+  useEffect(() => {
+    const load = async () => {
+      const snap = await getDoc(doc(db, 'householdRoutineYearCompletions', yearKey))
+      setHhYearCompletions(snap.exists() ? snap.data() : {})
+    }
+    load()
+  }, [yearKey])
+
   const navigate = (dir) => {
     let m = month + dir, y = year
     if (m < 0)  { m = 11; y-- }
@@ -60,6 +105,7 @@ export default function Routines() {
     setMonth(m); setYear(y)
   }
 
+  // Personal toggle
   const toggle = async (routineId, ck) => {
     const current = completions[routineId]?.[ck] || false
     const updated = { ...completions, [routineId]: { ...(completions[routineId] || {}), [ck]: !current } }
@@ -73,25 +119,102 @@ export default function Routines() {
 
   const isChecked = (routineId, ck) => completions[routineId]?.[ck] === true
 
-  const daily   = routines.filter((r) => r.frequency === 'daily').sort((a, b) => {
-    // AM before PM before null
-    const order = { AM: 0, PM: 1, null: 2 }
-    return (order[a.timeOfDay] ?? 2) - (order[b.timeOfDay] ?? 2)
-  })
-  const weekly  = routines.filter((r) => r.frequency === 'weekly')
-  const monthly = routines.filter((r) => r.frequency === 'monthly')
+  // Household toggle — daily / weekly / monthly
+  const toggleHh = async (routineId, ck) => {
+    const current = hhCompletions[routineId]?.[ck] || false
+    const updated = { ...hhCompletions, [routineId]: { ...(hhCompletions[routineId] || {}), [ck]: !current } }
+    setHhCompletions(updated)
+    await setDoc(
+      doc(db, 'householdRoutineCompletions', key),
+      { [routineId]: { [ck]: !current } },
+      { merge: true }
+    )
+  }
 
-  const days  = daysInMonth(year, month)
-  const weeks = weeksInMonth(year, month)
+  // Household toggle — quarterly / annual
+  const toggleHhYear = async (routineId, ck) => {
+    const current = hhYearCompletions[routineId]?.[ck] || false
+    const updated = { ...hhYearCompletions, [routineId]: { ...(hhYearCompletions[routineId] || {}), [ck]: !current } }
+    setHhYearCompletions(updated)
+    await setDoc(
+      doc(db, 'householdRoutineYearCompletions', yearKey),
+      { [routineId]: { [ck]: !current } },
+      { merge: true }
+    )
+  }
+
+  const isHhChecked     = (routineId, ck) => hhCompletions[routineId]?.[ck] === true
+  const isHhYearChecked = (routineId, ck) => hhYearCompletions[routineId]?.[ck] === true
+
+  // Household CRUD
+  const saveHhRoutine = async () => {
+    if (!hhModal?.text?.trim() || !user) return
+    const isDaily = hhModal.frequency === 'daily'
+    if (hhModal.id) {
+      await updateDoc(doc(db, 'householdRoutines', hhModal.id), {
+        text:      hhModal.text.trim(),
+        timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
+      })
+    } else {
+      await addDoc(collection(db, 'householdRoutines'), {
+        text:      hhModal.text.trim(),
+        frequency: hhModal.frequency,
+        timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
+        createdAt: serverTimestamp(),
+      })
+    }
+    setHhModal(null)
+  }
+
+  const deleteHhRoutine = async (id) => {
+    await deleteDoc(doc(db, 'householdRoutines', id))
+    setHhModal(null)
+  }
+
+  const hhByFreq = (freq) => {
+    const items = hhRoutines.filter((r) => r.frequency === freq)
+    if (freq === 'daily') {
+      return items.sort((a, b) => {
+        const order = { AM: 0, PM: 1, null: 2 }
+        return (order[a.timeOfDay] ?? 2) - (order[b.timeOfDay] ?? 2)
+      })
+    }
+    return items
+  }
+
+  const personal = {
+    daily: routines.filter((r) => r.frequency === 'daily').sort((a, b) => {
+      const order = { AM: 0, PM: 1, null: 2 }
+      return (order[a.timeOfDay] ?? 2) - (order[b.timeOfDay] ?? 2)
+    }),
+    weekly:  routines.filter((r) => r.frequency === 'weekly'),
+    monthly: routines.filter((r) => r.frequency === 'monthly'),
+  }
+
+  const days    = daysInMonth(year, month)
+  const weeks   = weeksInMonth(year, month)
 
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth()
-  const today = now.getDate()
+  const isCurrentYear  = year === now.getFullYear()
+  const today          = now.getDate()
+  const currentQuarter = Math.ceil((now.getMonth() + 1) / 3)
 
-  // Completion fraction helper
+  // Fraction helpers
   const fraction = (routineId, total, keyFn) => {
     const done = Array.from({ length: total }, (_, i) => keyFn(i + 1))
       .filter((k) => isChecked(routineId, k)).length
     return `${done}/${total}`
+  }
+
+  const hhFraction = (routineId, total, keyFn) => {
+    const done = Array.from({ length: total }, (_, i) => keyFn(i + 1))
+      .filter((k) => isHhChecked(routineId, k)).length
+    return `${done}/${total}`
+  }
+
+  const hhFractionYear = (routineId, keys) => {
+    const done = keys.filter((k) => isHhYearChecked(routineId, k)).length
+    return `${done}/${keys.length}`
   }
 
   const hasAny = routines.length > 0
@@ -127,7 +250,7 @@ export default function Routines() {
       </div>
 
       {/* My Routines — collapsible */}
-      <div className="profile-card">
+      <div className="profile-card" style={{ marginBottom: '12px' }}>
         <button
           onClick={() => setCollapsed((c) => !c)}
           style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
@@ -149,13 +272,13 @@ export default function Routines() {
               </div>
             )}
 
-            {/* ── Daily ── */}
-            {daily.length > 0 && (
+            {/* Daily */}
+            {personal.daily.length > 0 && (
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
                   Daily
                 </div>
-                {daily.map((r) => {
+                {personal.daily.map((r) => {
                   const frac = fraction(r.id, days, (d) => String(d))
                   return (
                     <div key={r.id} style={{ marginBottom: '14px' }}>
@@ -198,13 +321,13 @@ export default function Routines() {
               </div>
             )}
 
-            {/* ── Weekly ── */}
-            {weekly.length > 0 && (
+            {/* Weekly */}
+            {personal.weekly.length > 0 && (
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
                   Weekly
                 </div>
-                {weekly.map((r) => {
+                {personal.weekly.map((r) => {
                   const frac = fraction(r.id, weeks, (w) => String(w))
                   return (
                     <div key={r.id} style={{ marginBottom: '14px' }}>
@@ -240,19 +363,19 @@ export default function Routines() {
               </div>
             )}
 
-            {/* ── Monthly ── */}
-            {monthly.length > 0 && (
+            {/* Monthly */}
+            {personal.monthly.length > 0 && (
               <div>
                 <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
                   Monthly
                 </div>
-                {monthly.map((r, i) => {
+                {personal.monthly.map((r, i) => {
                   const checked = isChecked(r.id, 'done')
                   return (
                     <div key={r.id} style={{
                       display: 'flex', alignItems: 'center', gap: '10px',
                       padding: '8px 0',
-                      borderBottom: i < monthly.length - 1 ? '0.5px solid #f5f4f1' : 'none',
+                      borderBottom: i < personal.monthly.length - 1 ? '0.5px solid #f5f4f1' : 'none',
                     }}>
                       <button
                         onClick={() => toggle(r.id, 'done')}
@@ -279,6 +402,313 @@ export default function Routines() {
           </div>
         )}
       </div>
+
+      {/* Household Routines — collapsible, role-gated */}
+      {canSeeHousehold && (
+        <div className="profile-card">
+          <button
+            onClick={() => setHhCollapsed((c) => !c)}
+            style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+          >
+            <div className="profile-section-title" style={{ margin: 0 }}>Household Routines</div>
+            <svg
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+              style={{ width: 16, height: 16, color: '#aaa', transform: hhCollapsed ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform 0.2s' }}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          {!hhCollapsed && (
+            <div style={{ marginTop: '16px' }}>
+              {HH_FREQUENCIES.map((freq) => {
+                const items = hhByFreq(freq)
+                const quarterKeys = ['Q1', 'Q2', 'Q3', 'Q4']
+
+                return (
+                  <div key={freq} style={{ marginBottom: '20px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
+                      {freq}
+                    </div>
+
+                    {items.length === 0 && (
+                      <div style={{ fontSize: '12px', color: '#ccc', marginBottom: '8px' }}>No {freq} routines yet</div>
+                    )}
+
+                    {items.map((r) => {
+                      if (freq === 'daily') {
+                        const frac = hhFraction(r.id, days, (d) => String(d))
+                        return (
+                          <div key={r.id} style={{ marginBottom: '14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                              {r.timeOfDay && (
+                                <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E6F1FB', color: '#185FA5' }}>
+                                  {r.timeOfDay}
+                                </span>
+                              )}
+                              {canEdit && (
+                                <button
+                                  onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text, timeOfDay: r.timeOfDay || 'AM' })}
+                                  style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {Array.from({ length: days }, (_, i) => i + 1).map((d) => {
+                                const checked = isHhChecked(r.id, String(d))
+                                const isToday = isCurrentMonth && d === today
+                                return (
+                                  <button
+                                    key={d}
+                                    onClick={() => toggleHh(r.id, String(d))}
+                                    style={{
+                                      width: 28, height: 28, borderRadius: 6,
+                                      border: isToday && !checked ? '1.5px solid #534AB7' : checked ? 'none' : '0.5px solid #e0ddd8',
+                                      background: checked ? '#534AB7' : 'white',
+                                      color: checked ? 'white' : isToday ? '#534AB7' : '#888',
+                                      fontSize: 11, fontWeight: checked || isToday ? 600 : 400,
+                                      cursor: 'pointer', fontFamily: 'inherit',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {d}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      }
+
+                      if (freq === 'weekly') {
+                        const frac = hhFraction(r.id, weeks, (w) => String(w))
+                        return (
+                          <div key={r.id} style={{ marginBottom: '14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                              {canEdit && (
+                                <button
+                                  onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text })}
+                                  style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              {Array.from({ length: weeks }, (_, i) => i + 1).map((w) => {
+                                const checked = isHhChecked(r.id, String(w))
+                                const isThisWeek = isCurrentMonth && w === Math.ceil(today / 7)
+                                return (
+                                  <button
+                                    key={w}
+                                    onClick={() => toggleHh(r.id, String(w))}
+                                    style={{
+                                      flex: 1, height: 32, borderRadius: 8,
+                                      border: isThisWeek && !checked ? '1.5px solid #1D9E75' : checked ? 'none' : '0.5px solid #e0ddd8',
+                                      background: checked ? '#1D9E75' : 'white',
+                                      color: checked ? 'white' : isThisWeek ? '#1D9E75' : '#888',
+                                      fontSize: 11, fontWeight: checked || isThisWeek ? 600 : 400,
+                                      cursor: 'pointer', fontFamily: 'inherit',
+                                    }}
+                                  >
+                                    Wk {w}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      }
+
+                      if (freq === 'monthly') {
+                        const checked = isHhChecked(r.id, 'done')
+                        return (
+                          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                            <button
+                              onClick={() => toggleHh(r.id, 'done')}
+                              style={{
+                                width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                                border: checked ? 'none' : '0.5px solid #e0ddd8',
+                                background: checked ? '#854F0B' : 'white',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {checked && (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" style={{ width: 12, height: 12 }}>
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              )}
+                            </button>
+                            <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: checked ? 0.5 : 1 }}>{r.text}</span>
+                            {canEdit && (
+                              <button
+                                onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text })}
+                                style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        )
+                      }
+
+                      if (freq === 'quarterly') {
+                        const frac = hhFractionYear(r.id, quarterKeys)
+                        return (
+                          <div key={r.id} style={{ marginBottom: '14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                              {canEdit && (
+                                <button
+                                  onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text })}
+                                  style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              {quarterKeys.map((qk, qi) => {
+                                const checked = isHhYearChecked(r.id, qk)
+                                const isCurrent = isCurrentYear && (qi + 1) === currentQuarter
+                                return (
+                                  <button
+                                    key={qk}
+                                    onClick={() => toggleHhYear(r.id, qk)}
+                                    style={{
+                                      flex: 1, height: 32, borderRadius: 8,
+                                      border: isCurrent && !checked ? '1.5px solid #185FA5' : checked ? 'none' : '0.5px solid #e0ddd8',
+                                      background: checked ? '#185FA5' : 'white',
+                                      color: checked ? 'white' : isCurrent ? '#185FA5' : '#888',
+                                      fontSize: 11, fontWeight: checked || isCurrent ? 600 : 400,
+                                      cursor: 'pointer', fontFamily: 'inherit',
+                                    }}
+                                  >
+                                    {qk}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      }
+
+                      if (freq === 'annual') {
+                        const checked = isHhYearChecked(r.id, 'done')
+                        return (
+                          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                            <button
+                              onClick={() => toggleHhYear(r.id, 'done')}
+                              style={{
+                                width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                                border: checked ? 'none' : '0.5px solid #e0ddd8',
+                                background: checked ? '#0F6E56' : 'white',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {checked && (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" style={{ width: 12, height: 12 }}>
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              )}
+                            </button>
+                            <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: checked ? 0.5 : 1 }}>{r.text}</span>
+                            {canEdit && (
+                              <button
+                                onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text })}
+                                style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        )
+                      }
+
+                      return null
+                    })}
+
+                    {canCreate && (
+                      <button
+                        onClick={() => setHhModal({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null })}
+                        style={{ fontSize: '12px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
+                      >
+                        + Add {freq} routine
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Household Routine add / edit modal */}
+      {hhModal && (
+        <div className="modal-overlay" onClick={() => setHhModal(null)}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+            <h2 className="modal-title">
+              {hhModal.id ? 'Edit' : 'Add'} {hhModal.frequency} routine
+            </h2>
+            <input
+              className="form-input"
+              placeholder="e.g. Clean common areas, Monthly review"
+              value={hhModal.text}
+              onChange={(e) => setHhModal({ ...hhModal, text: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && saveHhRoutine()}
+              autoFocus
+            />
+            {hhModal.frequency === 'daily' && (
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+                {['AM', 'PM'].map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setHhModal({ ...hhModal, timeOfDay: t })}
+                    style={{
+                      flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: '13px', fontWeight: 500,
+                      background: hhModal.timeOfDay === t ? '#185FA5' : '#f0ede8',
+                      color: hhModal.timeOfDay === t ? '#fff' : '#666',
+                    }}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {hhModal.id && canEdit && (
+                <button
+                  onClick={() => deleteHhRoutine(hhModal.id)}
+                  style={{ background: 'none', border: '0.5px solid #f5c5c5', borderRadius: '8px', padding: '9px 14px', fontSize: '13px', color: '#c0392b', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Delete
+                </button>
+              )}
+              <button
+                className="btn-primary"
+                style={{ flex: 1, margin: 0 }}
+                onClick={saveHhRoutine}
+                disabled={!hhModal.text?.trim()}
+              >
+                {hhModal.id ? 'Save changes' : 'Add routine'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
