@@ -65,6 +65,7 @@ export default function Routines() {
   const [trackerCompletions, setTrackerCompletions]         = useState({})
   const [trackerYearCompletions, setTrackerYearCompletions] = useState({})
   const [myProfile, setMyProfile]                           = useState(null)
+  const [lastCompletedMap, setLastCompletedMap]             = useState({})
 
   const key     = monthKey(year, month)
   const yearKey = String(year)
@@ -125,6 +126,88 @@ export default function Routines() {
     }
     load()
   }, [user])
+
+  // Last-completed history for weekly / monthly / quarterly / annual
+  useEffect(() => {
+    if (!hhRoutines.length) return
+    const load = async () => {
+      const n = new Date()
+      const ny = n.getFullYear()
+      const nm = n.getMonth()
+
+      // Build last-12-months keys (most recent first)
+      const monthKeys = Array.from({ length: 12 }, (_, i) => {
+        let m = nm - i, y = ny
+        if (m < 0) { m += 12; y-- }
+        return monthKey(y, m)
+      })
+
+      // Build last-3-year keys (most recent first)
+      const yearKeys = [String(ny), String(ny - 1), String(ny - 2)]
+
+      const [monthSnaps, yearSnaps] = await Promise.all([
+        Promise.all(monthKeys.map((mk) => getDoc(doc(db, 'householdRoutineTracking', mk)))),
+        Promise.all(yearKeys.map((yk) => getDoc(doc(db, 'householdRoutineYearTracking', yk)))),
+      ])
+
+      const result = {}
+
+      for (const r of hhRoutines) {
+        if (r.frequency === 'weekly') {
+          for (let i = 0; i < monthSnaps.length; i++) {
+            const snap = monthSnaps[i]
+            if (!snap.exists()) continue
+            const data = snap.data()
+            const entry = data[r.id]
+            if (!entry) continue
+            const completedWeeks = Object.keys(entry).map(Number).filter((n) => !isNaN(n) && entry[String(n)])
+            if (completedWeeks.length > 0) {
+              const lastWk = Math.max(...completedWeeks)
+              const [ky, km] = monthKeys[i].split('-').map(Number)
+              result[r.id] = `Wk ${lastWk}, ${new Date(ky, km - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}`
+              break
+            }
+          }
+        } else if (r.frequency === 'monthly') {
+          for (let i = 0; i < monthSnaps.length; i++) {
+            const snap = monthSnaps[i]
+            if (!snap.exists()) continue
+            const data = snap.data()
+            if (data[r.id]?.['done']) {
+              const [ky, km] = monthKeys[i].split('-').map(Number)
+              result[r.id] = new Date(ky, km - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+              break
+            }
+          }
+        } else if (r.frequency === 'quarterly') {
+          outer: for (let i = 0; i < yearSnaps.length; i++) {
+            const snap = yearSnaps[i]
+            if (!snap.exists()) continue
+            const data = snap.data()
+            for (const qk of ['Q4', 'Q3', 'Q2', 'Q1']) {
+              if (data[r.id]?.[qk]) {
+                result[r.id] = `${qk} '${yearKeys[i].slice(2)}`
+                break outer
+              }
+            }
+          }
+        } else if (r.frequency === 'annual') {
+          for (let i = 0; i < yearSnaps.length; i++) {
+            const snap = yearSnaps[i]
+            if (!snap.exists()) continue
+            const data = snap.data()
+            if (data[r.id]?.['done']) {
+              result[r.id] = yearKeys[i]
+              break
+            }
+          }
+        }
+      }
+
+      setLastCompletedMap(result)
+    }
+    load()
+  }, [hhRoutines])
 
   const navigate = (dir) => {
     let m = month + dir, y = year
@@ -333,10 +416,12 @@ export default function Routines() {
             // ── Weekly ──
             if (freq === 'weekly') {
               const frac = trackerFraction(r.id, weeks, (w) => String(w))
+              const last = lastCompletedMap[r.id]
               return (
                 <div key={r.id} style={{ marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '8px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                    {last && <span style={{ fontSize: '10px', color: '#bbb' }}>Last: {last}</span>}
                     <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
@@ -370,6 +455,7 @@ export default function Routines() {
             if (freq === 'monthly') {
               const tracked = getTracked(r.id, 'done')
               const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+              const last    = lastCompletedMap[r.id]
               return (
                 <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
                   <button
@@ -386,7 +472,8 @@ export default function Routines() {
                   >
                     {tracked ? tracked.initials : ''}
                   </button>
-                  <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                  <span style={{ fontSize: '13px', fontWeight: 500, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                  {last && <span style={{ fontSize: '10px', color: '#bbb', marginLeft: 'auto' }}>Last: {last}</span>}
                 </div>
               )
             }
@@ -394,10 +481,12 @@ export default function Routines() {
             // ── Quarterly ──
             if (freq === 'quarterly') {
               const frac = trackerFractionYear(r.id, quarterKeys)
+              const last = lastCompletedMap[r.id]
               return (
                 <div key={r.id} style={{ marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '8px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
+                    {last && <span style={{ fontSize: '10px', color: '#bbb' }}>Last: {last}</span>}
                     <span style={{ fontSize: '11px', color: '#ccc', marginLeft: 'auto' }}>{frac}</span>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
@@ -431,6 +520,7 @@ export default function Routines() {
             if (freq === 'annual') {
               const tracked = getTrackedYear(r.id, 'done')
               const cStyle  = tracked ? (COLOR_STYLES[tracked.color] || COLOR_STYLES.teal) : null
+              const last    = lastCompletedMap[r.id]
               return (
                 <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
                   <button
@@ -447,7 +537,8 @@ export default function Routines() {
                   >
                     {tracked ? tracked.initials : ''}
                   </button>
-                  <span style={{ fontSize: '13px', fontWeight: 500, flex: 1, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                  <span style={{ fontSize: '13px', fontWeight: 500, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                  {last && <span style={{ fontSize: '10px', color: '#bbb', marginLeft: 'auto' }}>Last: {last}</span>}
                 </div>
               )
             }
