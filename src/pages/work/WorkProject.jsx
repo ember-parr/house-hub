@@ -75,6 +75,12 @@ function getActiveWeeks(startDate, endDate) {
   return weeks
 }
 
+function getWeekFriday(monday) {
+  const friday = new Date(monday)
+  friday.setDate(friday.getDate() + 4)
+  return weekKey(friday)
+}
+
 function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
 }
@@ -196,7 +202,7 @@ export default function WorkProject() {
         id:         newId(),
         title:      actionModal.title.trim(),
         completeBy: actionModal.completeBy || null,
-        status:     'Not started',
+        status:     actionModal.status,
         createdAt:  new Date().toISOString(),
       })
     }
@@ -337,7 +343,7 @@ export default function WorkProject() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
               <div className="profile-section-title" style={{ margin: 0 }}>Action Items</div>
               <button
-                onClick={() => setActionModal({ title: '', completeBy: '', status: 'Not started' })}
+                onClick={() => setActionModal({ title: '', completeBy: getWeekFriday(currentWeek), status: 'Not started' })}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}
               >

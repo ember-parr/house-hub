@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { useAuth } from '../context/AuthContext'
+import { useUserRole } from '../hooks/useUserRole'
 import {
     doc, getDoc, updateDoc, addDoc, deleteDoc,
     collection, getDocs, query, orderBy, onSnapshot,
@@ -48,6 +49,7 @@ function Avatar({ photoURL, name, style, size = 52 }) {
 
 export default function Profile() {
     const { user, logOut } = useAuth()
+    const { isAdmin } = useUserRole()
     const [profile, setProfile] = useState(null)
     const [members, setMembers] = useState([])
     const [nickname, setNickname] = useState('')
@@ -182,6 +184,11 @@ export default function Profile() {
         if (!user) return
         await deleteDoc(doc(db, 'users', user.uid, 'workProjects', id))
         setWorkModal(null)
+    }
+
+    const changeUserType = async (memberId, newType) => {
+        await updateDoc(doc(db, 'users', memberId), { userType: newType })
+        setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, userType: newType } : m))
     }
 
     const avatarStyle = COLOR_STYLES[profile?.color] || COLOR_STYLES.teal
@@ -358,7 +365,20 @@ export default function Profile() {
                                     <div className="member-name">{name}</div>
                                     <div className="member-email">{member.email}</div>
                                 </div>
-                                {isYou && <span className="you-badge">you</span>}
+                                {isYou
+                                    ? <span className="you-badge">you</span>
+                                    : isAdmin && (
+                                        <select
+                                            value={member.userType || 'new'}
+                                            onChange={(e) => changeUserType(member.id, e.target.value)}
+                                            style={{ fontSize: '11px', color: '#555', background: 'none', border: '0.5px solid #e0ddd8', borderRadius: '6px', padding: '2px 6px', cursor: 'pointer', fontFamily: 'inherit' }}
+                                        >
+                                            <option value="admin">Admin</option>
+                                            <option value="contributor">Contributor</option>
+                                            <option value="new">New</option>
+                                        </select>
+                                    )
+                                }
                             </div>
                         )
                     })}

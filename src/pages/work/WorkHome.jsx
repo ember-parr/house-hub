@@ -130,8 +130,15 @@ export default function WorkHome() {
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
+  const todayStr = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
+  const nonExpiredProjects = projects.filter((p) => !p.endDate || p.endDate >= todayStr)
+
   // Projects active during the selected week that have at least one action item or note
-  const visibleProjects = projects
+  const visibleProjects = nonExpiredProjects
     .filter((p) => isProjectActiveThisWeek(p, currentWeek))
     .map((p) => ({ ...p, wd: weekDataMap[p.id] || { actionItems: [], notes: [], recap: '' } }))
 
@@ -149,9 +156,9 @@ export default function WorkHome() {
       </div>
 
       {/* Project nav cards */}
-      {projects.length > 0 && (
+      {nonExpiredProjects.length > 0 && (
         <div className="card-grid" style={{ marginBottom: '1.5rem' }}>
-          {projects.map((p) => (
+          {nonExpiredProjects.map((p) => (
             <Link key={p.id} to={`/work/${p.id}`} className="nav-card">
               <h2>{p.name}</h2>
             </Link>
@@ -159,7 +166,7 @@ export default function WorkHome() {
         </div>
       )}
 
-      {projects.length === 0 && (
+      {nonExpiredProjects.length === 0 && (
         <div className="empty-state" style={{ marginBottom: '1.5rem' }}>
           No projects yet — add them from your Profile page.
         </div>

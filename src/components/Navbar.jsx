@@ -125,9 +125,16 @@ export default function Navbar() {
     })
   }, [user])
 
+  const todayStr = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
+  const activeWorkProjects = workProjects.filter((p) => !p.endDate || p.endDate >= todayStr)
+
   const items = navItems.map((item) =>
     item.label === 'Work'
-      ? { ...item, children: workProjects.length > 0 ? workProjects.map((p) => ({ to: `/work/${p.id}`, label: p.name })) : undefined }
+      ? { ...item, children: activeWorkProjects.length > 0 ? activeWorkProjects.map((p) => ({ to: `/work/${p.id}`, label: p.name })) : undefined }
       : item
   )
 
