@@ -120,7 +120,9 @@ export default function Expenses() {
 
   // Role-scoped views
   const visibleTransactions   = isAdmin ? filtered : filtered.filter((t) => t.assignedTo === user?.uid)
-  const visibleOutstanding    = isAdmin ? outstandingByPerson : outstandingByPerson.filter((m) => m.id === user?.uid)
+  const visibleOutstanding    = isAdmin
+    ? outstandingByPerson.filter((m) => m.userType === 'admin' || m.userType === 'contributor')
+    : outstandingByPerson.filter((m) => m.id === user?.uid)
   const visibleMembers        = isAdmin ? members : members.filter((m) => m.id === user?.uid)
 
   // Re-group scoped transactions by month

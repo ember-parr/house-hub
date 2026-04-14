@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
+import { useAuth } from '../../context/AuthContext'
 import {
   collection, addDoc, updateDoc, deleteDoc,
   doc, query, orderBy, onSnapshot, getDocs,
@@ -49,27 +50,29 @@ function initials(name) {
   return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
 }
 
-function formatDuration(start, end) {
-  if (!start || !end) return null
-  const diff = new Date(end + 'T00:00:00') - new Date(start + 'T00:00:00')
-  if (diff <= 0) return null
-  const days = Math.round(diff / 86400000)
-  return days === 1 ? '1 day' : `${days} days`
+function fmtEndDate(end) {
+  if (!end) return null
+  return new Date(end + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-const emptyForm = {
-  title: '', details: '', prerequisites: [],
-  category: 'General', subCategory: '', assignedTo: null,
-  startDate: '', endDate: '', status: 'Not yet started',
-  subtasks: [],
+function makeEmptyForm(uid = null) {
+  const d = new Date()
+  d.setDate(d.getDate() + 2)
+  return {
+    title: '', details: '', prerequisites: [],
+    category: 'General', subCategory: '', assignedTo: uid,
+    endDate: d.toISOString().split('T')[0], status: 'Not yet started',
+    subtasks: [],
+  }
 }
 
 export default function ToDoHome() {
+  const { user } = useAuth()
   const [todos, setTodos]         = useState([])
   const [members, setMembers]     = useState([])
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [form, setForm]           = useState(emptyForm)
+  const [form, setForm]           = useState(makeEmptyForm)
   const [saving, setSaving]       = useState(false)
   const [subtaskInput, setSubtaskInput] = useState('')
 
@@ -82,14 +85,14 @@ export default function ToDoHome() {
 
   useEffect(() => {
     getDocs(query(collection(db, 'users'), orderBy('joinedAt'))).then((snap) => {
-      setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+      setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((m) => m.userType === 'admin' || m.userType === 'contributor'))
     })
   }, [])
 
   const closeModal = () => {
     setShowModal(false)
     setEditingId(null)
-    setForm(emptyForm)
+    setForm(makeEmptyForm(user?.uid))
     setSubtaskInput('')
   }
 
@@ -101,7 +104,6 @@ export default function ToDoHome() {
       category:      todo.category     || 'General',
       subCategory:   todo.subCategory  || '',
       assignedTo:    todo.assignedTo   || null,
-      startDate:     todo.startDate    || '',
       endDate:       todo.endDate      || '',
       status:        todo.status       || 'Not yet started',
       subtasks:      todo.subtasks     || [],
@@ -129,9 +131,8 @@ export default function ToDoHome() {
       assignedTo:      assignee?.id   || null,
       assignedToName:  assignee ? (assignee.nickname || assignee.displayName) : null,
       assignedToColor: assignee?.color || null,
-      startDate:       form.startDate || null,
       endDate:         form.endDate   || null,
-      status:          form.status,
+      status:          form.prerequisites.length > 0 && todos.some((t) => form.prerequisites.includes(t.id) && t.status !== 'Complete') ? 'Blocked' : form.status,
       subtasks:        form.subtasks,
     }
     if (editingId) {
@@ -145,19 +146,28 @@ export default function ToDoHome() {
 
   const handleDelete = (id) => deleteDoc(doc(db, 'todos', id))
 
-  const updateStatus = (todo, status) =>
-    updateDoc(doc(db, 'todos', todo.id), { status })
+  const updateStatus = async (todo, status) => {
+    await updateDoc(doc(db, 'todos', todo.id), { status })
+    if (status === 'Complete') {
+      const dependents = todos.filter((t) => t.prerequisites?.includes(todo.id) && t.status === 'Blocked')
+      for (const dep of dependents) {
+        const allDone = dep.prerequisites.every((pid) =>
+          pid === todo.id ? true : todos.find((t) => t.id === pid)?.status === 'Complete'
+        )
+        if (allDone) await updateDoc(doc(db, 'todos', dep.id), { status: 'Not yet started' })
+      }
+    }
+  }
 
   const activeTodos = todos.filter((t) => t.status !== 'Complete')
   const doneTodos   = todos.filter((t) => t.status === 'Complete')
 
-  const duration = formatDuration(form.startDate, form.endDate)
 
   return (
     <div className="page">
       <div className="page-header">
         <h1 className="page-title">To-Do's</h1>
-        <button className="icon-btn" onClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true) }}>
+        <button className="icon-btn" onClick={() => { setForm(makeEmptyForm(user?.uid)); setEditingId(null); setShowModal(true) }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
@@ -236,22 +246,11 @@ export default function ToDoHome() {
               {(SUBCATEGORIES[form.category] || []).map((s) => <option key={s}>{s}</option>)}
             </select>
 
-            {/* Dates */}
-            <div className="form-row">
-              <div style={{ flex: 1 }}>
-                <div style={labelStyle}>Start</div>
-                <input className="form-input" style={{ margin: 0 }} type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={labelStyle}>End</div>
-                <input className="form-input" style={{ margin: 0 }} type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
-              </div>
+            {/* Goal date */}
+            <div style={{ marginBottom: '12px' }}>
+              <div style={labelStyle}>Goal date</div>
+              <input className="form-input" style={{ margin: 0 }} type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
             </div>
-            {duration && (
-              <div style={{ fontSize: '11px', color: '#888', marginBottom: '10px', marginTop: '-2px' }}>
-                Duration: {duration}
-              </div>
-            )}
 
             {/* Subtasks */}
             <div style={{ marginBottom: '12px' }}>
@@ -279,11 +278,11 @@ export default function ToDoHome() {
             </div>
 
             {/* Prerequisites */}
-            {todos.filter((t) => t.id !== editingId).length > 0 && (
+            {todos.filter((t) => t.id !== editingId && t.status !== 'Complete').length > 0 && (
               <div style={{ marginBottom: '12px' }}>
                 <div style={labelStyle}>Prerequisites</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {todos.filter((t) => t.id !== editingId).map((t) => {
+                  {todos.filter((t) => t.id !== editingId && t.status !== 'Complete').map((t) => {
                     const sel = form.prerequisites.includes(t.id)
                     return (
                       <button
@@ -360,7 +359,7 @@ const labelStyle = {
 
 function TodoRow({ todo, todos, onDelete, onStatusChange, onEdit }) {
   const aStyle     = todo.assignedToColor ? (COLOR_STYLES[todo.assignedToColor] || COLOR_STYLES.teal) : null
-  const duration   = formatDuration(todo.startDate, todo.endDate)
+  const endDate    = fmtEndDate(todo.endDate)
   const prereqs    = todos.filter((t) => todo.prerequisites?.includes(t.id))
   const isComplete = todo.status === 'Complete'
 
@@ -392,7 +391,7 @@ function TodoRow({ todo, todos, onDelete, onStatusChange, onEdit }) {
             {todo.category && <span className={`badge ${CATEGORY_STYLES[todo.category] || 'badge-gray'}`}>{todo.category}</span>}
             {todo.subCategory && <span className="badge badge-gray">{todo.subCategory}</span>}
             {todo.status   && <span className={`badge ${STATUS_STYLES[todo.status]}`}>{todo.status}</span>}
-            {duration && <span className="task-date">{duration}</span>}
+            {endDate && <span className="task-date">{endDate}</span>}
 
             {todo.assignedToName && aStyle ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#f5f4f1', borderRadius: '20px', padding: '2px 7px 2px 3px' }}>
