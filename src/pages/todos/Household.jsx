@@ -9,7 +9,7 @@ import {
 
 const STATUSES = ['Not yet started', 'In progress', 'Blocked', 'Complete']
 
-const SUBCATEGORIES_HOUSEHOLD = ['Kitchen', 'Bathroom', 'Bedroom', 'Living Room', 'Outdoor', 'Repairs', 'Cleaning', 'Other']
+const SUBCATEGORIES_HOUSEHOLD = ['Kitchen', 'Bathroom', 'Bedroom', 'Living Room', 'Outdoor', 'Repairs', 'Cleaning', 'Upgrade', 'Other']
 
 const STATUS_STYLES = {
   'Not yet started': 'badge-gray',
