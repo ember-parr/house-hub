@@ -34,6 +34,26 @@ function weeksInMonth(year, month) {
   return Math.ceil(daysInMonth(year, month) / 7)
 }
 
+function mondaysInMonth(year, month) {
+  const firstDow = new Date(year, month, 1).getDay()
+  const firstMonday = firstDow === 1 ? 1 : 1 + (8 - firstDow) % 7
+  let count = 0
+  for (let d = firstMonday; d <= daysInMonth(year, month); d += 7) count++
+  return count
+}
+
+function getActiveZone(date) {
+  const y = date.getFullYear(), m = date.getMonth(), day = date.getDate()
+  const firstDow = new Date(y, m, 1).getDay()
+  const firstMonday = firstDow === 1 ? 1 : 1 + (8 - firstDow) % 7
+  if (day < firstMonday) {
+    // Before first Monday — show zone 5 if previous month had 5 Mondays
+    const py = m === 0 ? y - 1 : y, pm = m === 0 ? 11 : m - 1
+    return mondaysInMonth(py, pm) >= 5 ? 5 : null
+  }
+  return Math.min(Math.floor((day - firstMonday) / 7) + 1, 5)
+}
+
 function nameInitials(name) {
   if (!name) return '?'
   return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
@@ -323,6 +343,7 @@ export default function Routines() {
   const days    = daysInMonth(year, month)
   const weeks   = weeksInMonth(year, month)
 
+  const activeZone     = getActiveZone(now)
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth()
   const isCurrentYear  = year === now.getFullYear()
   const today          = now.getDate()
@@ -357,6 +378,9 @@ export default function Routines() {
     const quarterKeys = ['Q1', 'Q2', 'Q3', 'Q4']
     return HH_FREQUENCIES.map((freq) => {
       let freqItems = groupItems.filter((r) => r.frequency === freq)
+      if (freq === 'monthly') {
+        freqItems = freqItems.filter((r) => !r.zone || r.zone === activeZone)
+      }
       if (freq === 'daily') {
         freqItems = [...freqItems].sort((a, b) => {
           const order = { AM: 0, PM: 1, null: 2 }
@@ -818,6 +842,11 @@ export default function Routines() {
                         {r.room && (
                           <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#FAEEDA', color: '#854F0B' }}>
                             {r.room}
+                          </span>
+                        )}
+                        {r.zone && (
+                          <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E1F5EE', color: '#0F6E56' }}>
+                            Zone {r.zone}
                           </span>
                         )}
                         {canEdit && (
