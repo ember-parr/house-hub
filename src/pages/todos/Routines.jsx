@@ -78,9 +78,11 @@ export default function Routines() {
   const [collapsed, setCollapsed]     = useState(true)
 
   // Household management
-  const [hhCollapsed, setHhCollapsed] = useState(true)
-  const [hhRoutines, setHhRoutines]   = useState([])
-  const [hhModal, setHhModal]         = useState(null)
+  const [hhCollapsed, setHhCollapsed]         = useState(true)
+  const [hhRoutines, setHhRoutines]           = useState([])
+  const [hhModal, setHhModal]                 = useState(null)
+  const [roomZones, setRoomZones]             = useState({})
+  const [roomZonesCollapsed, setRoomZonesCollapsed] = useState(true)
 
   // Household tracker
   const [trackerCompletions, setTrackerCompletions]         = useState({})
@@ -119,6 +121,13 @@ export default function Routines() {
     const q = query(collection(db, 'householdRoutines'), orderBy('createdAt'))
     return onSnapshot(q, (snap) => {
       setHhRoutines(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [])
+
+  // Room → zone assignments
+  useEffect(() => {
+    return onSnapshot(doc(db, 'householdConfig', 'roomZones'), (snap) => {
+      setRoomZones(snap.exists() ? snap.data() : {})
     })
   }, [])
 
@@ -300,12 +309,15 @@ export default function Routines() {
   const saveHhRoutine = async () => {
     if (!hhModal?.text?.trim() || !user) return
     const isDaily = hhModal.frequency === 'daily'
+    const resolvedZone = hhModal.zone
+      ? Number(hhModal.zone)
+      : (hhModal.room && roomZones[hhModal.room]) ? roomZones[hhModal.room] : null
     if (hhModal.id) {
       await updateDoc(doc(db, 'householdRoutines', hhModal.id), {
         text:      hhModal.text.trim(),
         timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
         room:      hhModal.room || null,
-        zone:      hhModal.zone ? Number(hhModal.zone) : null,
+        zone:      resolvedZone,
       })
     } else {
       await addDoc(collection(db, 'householdRoutines'), {
@@ -313,11 +325,18 @@ export default function Routines() {
         frequency: hhModal.frequency,
         timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
         room:      hhModal.room || null,
-        zone:      hhModal.zone ? Number(hhModal.zone) : null,
+        zone:      resolvedZone,
         createdAt: serverTimestamp(),
       })
     }
     setHhModal(null)
+  }
+
+  const saveRoomZone = async (room, zone) => {
+    const updated = zone ? { ...roomZones, [room]: zone } : { ...roomZones }
+    if (!zone) delete updated[room]
+    setRoomZones(updated)
+    await setDoc(doc(db, 'householdConfig', 'roomZones'), updated)
   }
 
   const deleteHhRoutine = async (id) => {
@@ -907,6 +926,59 @@ export default function Routines() {
                         + Add {freq} routine
                       </button>
                     )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Room Zone Assignments ── */}
+      {canSeeHousehold && (
+        <div className="profile-card" style={{ marginTop: '12px' }}>
+          <button
+            onClick={() => setRoomZonesCollapsed((c) => !c)}
+            style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+          >
+            <div className="profile-section-title" style={{ margin: 0 }}>Room Zone Assignments</div>
+            <svg
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+              style={{ width: 16, height: 16, color: '#aaa', transform: roomZonesCollapsed ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform 0.2s' }}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          {!roomZonesCollapsed && (
+            <div style={{ marginTop: '14px' }}>
+              <div style={{ fontSize: '12px', color: '#bbb', marginBottom: '14px' }}>
+                Assign a zone to each room. Routines created without a zone will inherit it automatically.
+              </div>
+              {HH_ROOMS.map((room) => {
+                const assigned = roomZones[room] || null
+                return (
+                  <div key={room} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                    <span style={{ flex: 1, fontSize: '13px', fontWeight: 500 }}>{room}</span>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {[1, 2, 3, 4, 5].map((z) => {
+                        const active = assigned === z
+                        return (
+                          <button
+                            key={z}
+                            onClick={() => saveRoomZone(room, active ? null : z)}
+                            style={{
+                              width: 28, height: 28, borderRadius: '6px', border: 'none',
+                              cursor: 'pointer', fontFamily: 'inherit', fontSize: '11px', fontWeight: 600,
+                              background: active ? '#0F6E56' : '#f5f4f1',
+                              color: active ? '#fff' : '#aaa',
+                            }}
+                          >
+                            {z}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )
               })}
