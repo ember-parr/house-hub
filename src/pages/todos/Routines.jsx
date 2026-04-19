@@ -70,6 +70,7 @@ export default function Routines() {
   const now = new Date()
   const [year, setYear]   = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth())
+  const [viewedZone, setViewedZone] = useState(() => getActiveZone(now) || 1)
 
   // Personal routines
   const [routines, setRoutines]       = useState([])
@@ -234,7 +235,11 @@ export default function Routines() {
     if (m < 0)  { m = 11; y-- }
     if (m > 11) { m = 0;  y++ }
     setMonth(m); setYear(y)
+    const isCurrent = y === now.getFullYear() && m === now.getMonth()
+    setViewedZone(isCurrent ? (getActiveZone(now) || 1) : 1)
   }
+
+  const viewedMonthZones = mondaysInMonth(year, month)
 
   // Personal toggle
   const toggle = async (routineId, ck) => {
@@ -379,7 +384,7 @@ export default function Routines() {
     return HH_FREQUENCIES.map((freq) => {
       let freqItems = groupItems.filter((r) => r.frequency === freq)
       if (freq === 'monthly') {
-        freqItems = freqItems.filter((r) => !r.zone || r.zone === activeZone)
+        freqItems = freqItems.filter((r) => !r.zone || r.zone === viewedZone)
       }
       if (freq === 'daily') {
         freqItems = [...freqItems].sort((a, b) => {
@@ -594,11 +599,19 @@ export default function Routines() {
           </svg>
           To-Dos
         </Link>
+        {!isCurrentMonth && (
+          <button
+            onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth()); setViewedZone(getActiveZone(now) || 1) }}
+            style={{ background: 'none', border: '0.5px solid #d0cdc8', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: 500, color: '#666', cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            Today
+          </button>
+        )}
       </div>
 
       <h1 className="page-title" style={{ marginBottom: '1rem' }}>Routines</h1>
 
-      {/* Month nav */}
+      {/* Month nav + zone selector */}
       <div className="profile-card" style={{ marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <button onClick={() => navigate(-1)} className="bl-nav-btn">
@@ -612,6 +625,33 @@ export default function Routines() {
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </button>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', marginTop: '12px' }}>
+          {Array.from({ length: viewedMonthZones }, (_, i) => i + 1).map((z) => {
+            const isSelected = viewedZone === z
+            const isCurrent  = activeZone === z && isCurrentMonth
+            return (
+              <button
+                key={z}
+                onClick={() => setViewedZone(z)}
+                style={{
+                  flex: 1, padding: '6px 0', borderRadius: '8px', border: 'none',
+                  cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px', fontWeight: 600,
+                  background: isSelected ? '#0F6E56' : isCurrent ? '#E1F5EE' : '#f5f4f1',
+                  color: isSelected ? '#fff' : isCurrent ? '#0F6E56' : '#999',
+                  position: 'relative',
+                }}
+              >
+                Zone {z}
+                {isCurrent && !isSelected && (
+                  <span style={{
+                    position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)',
+                    width: 4, height: 4, borderRadius: '50%', background: '#0F6E56',
+                  }} />
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 

@@ -68,6 +68,26 @@ function nameInitials(name) {
   return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
 }
 
+function mondaysInMonth(year, month) {
+  const days = new Date(year, month + 1, 0).getDate()
+  const firstDow = new Date(year, month, 1).getDay()
+  const firstMonday = firstDow === 1 ? 1 : 1 + (8 - firstDow) % 7
+  let count = 0
+  for (let d = firstMonday; d <= days; d += 7) count++
+  return count
+}
+
+function getActiveZone(date) {
+  const y = date.getFullYear(), m = date.getMonth(), day = date.getDate()
+  const firstDow = new Date(y, m, 1).getDay()
+  const firstMonday = firstDow === 1 ? 1 : 1 + (8 - firstDow) % 7
+  if (day < firstMonday) {
+    const py = m === 0 ? y - 1 : y, pm = m === 0 ? 11 : m - 1
+    return mondaysInMonth(py, pm) >= 5 ? 5 : null
+  }
+  return Math.min(Math.floor((day - firstMonday) / 7) + 1, 5)
+}
+
 const TODO_CATEGORIES = ['General', 'Personal', 'Household', 'Work', 'Health', 'Errands']
 
 function TaskRow({ todo, onComplete, todayStr, tomorrowStr }) {
@@ -97,7 +117,7 @@ function RoutineRow({ routine, onToggle }) {
   return (
     <div
       style={{
-        display: 'flex', alignItems: 'center', gap: '10px',
+        display: 'flex', alignItems: 'center', gap: '8px',
         padding: '8px 0', borderBottom: '0.5px solid #f5f4f1',
       }}
     >
@@ -112,10 +132,21 @@ function RoutineRow({ routine, onToggle }) {
       />
       <span style={{ flex: 1, fontSize: '13px', fontWeight: 500 }}>{routine.text}</span>
       {routine.room && (
-        <span className="badge badge-gray" style={{ fontSize: '10px' }}>{routine.room}</span>
+        <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#FAEEDA', color: '#854F0B' }}>
+          {routine.room}
+        </span>
+      )}
+      {routine.zone && (
+        <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E1F5EE', color: '#0F6E56' }}>
+          Zone {routine.zone}
+        </span>
       )}
       {routine.timeOfDay && (
-        <span style={{ fontSize: '10px', color: '#888', background: '#f5f4f1', borderRadius: '20px', padding: '2px 6px' }}>
+        <span style={{
+          fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px',
+          background: routine.timeOfDay === 'AM' ? '#FAEEDA' : '#EEEDFE',
+          color:      routine.timeOfDay === 'AM' ? '#854F0B' : '#534AB7',
+        }}>
           {routine.timeOfDay}
         </span>
       )}
@@ -139,6 +170,7 @@ export default function Home() {
   const tomorrowDate   = new Date(now); tomorrowDate.setDate(today + 1)
   const tomorrowStr    = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth() + 1).padStart(2, '0')}-${String(tomorrowDate.getDate()).padStart(2, '0')}`
   const curQuarterKey  = `Q${currentQuarter}`
+  const activeZone     = getActiveZone(now)
 
   const [todos, setTodos]                   = useState([])
   const [personalRoutines, setPersonalRoutines] = useState([])
@@ -265,7 +297,7 @@ export default function Home() {
       .filter((r) => r.frequency === 'monthly' && !personalComps[r.id]?.['done'])
       .map((r) => ({ ...r, source: 'personal' })),
     ...hhRoutines
-      .filter((r) => r.frequency === 'monthly' && !hhMonthComps[r.id]?.['done'])
+      .filter((r) => r.frequency === 'monthly' && !hhMonthComps[r.id]?.['done'] && (!r.zone || r.zone === activeZone))
       .map((r) => ({ ...r, source: 'household' })),
   ]
 
