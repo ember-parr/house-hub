@@ -280,6 +280,7 @@ export default function Routines() {
         text:      hhModal.text.trim(),
         timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
         room:      hhModal.room || null,
+        zone:      hhModal.zone ? Number(hhModal.zone) : null,
       })
     } else {
       await addDoc(collection(db, 'householdRoutines'), {
@@ -287,6 +288,7 @@ export default function Routines() {
         frequency: hhModal.frequency,
         timeOfDay: isDaily ? (hhModal.timeOfDay || 'AM') : null,
         room:      hhModal.room || null,
+        zone:      hhModal.zone ? Number(hhModal.zone) : null,
         createdAt: serverTimestamp(),
       })
     }
@@ -378,7 +380,11 @@ export default function Routines() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
                     {r.timeOfDay && (
-                      <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E6F1FB', color: '#185FA5' }}>
+                      <span style={{
+                        fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px',
+                        background: r.timeOfDay === 'AM' ? '#FAEEDA' : '#EEEDFE',
+                        color:      r.timeOfDay === 'AM' ? '#854F0B' : '#534AB7',
+                      }}>
                         {r.timeOfDay}
                       </span>
                     )}
@@ -473,6 +479,11 @@ export default function Routines() {
                     {tracked ? tracked.initials : ''}
                   </button>
                   <span style={{ fontSize: '13px', fontWeight: 500, opacity: tracked ? 0.5 : 1 }}>{r.text}</span>
+                  {r.zone && (
+                    <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E1F5EE', color: '#0F6E56', flexShrink: 0 }}>
+                      Zone {r.zone}
+                    </span>
+                  )}
                   {last && <span style={{ fontSize: '10px', color: '#bbb', marginLeft: 'auto' }}>Last: {last}</span>}
                 </div>
               )
@@ -616,7 +627,11 @@ export default function Routines() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                         <span style={{ fontSize: '13px', fontWeight: 500 }}>{r.text}</span>
                         {r.timeOfDay && (
-                          <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px', background: '#E6F1FB', color: '#185FA5' }}>
+                          <span style={{
+                            fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '20px',
+                            background: r.timeOfDay === 'AM' ? '#FAEEDA' : '#EEEDFE',
+                            color:      r.timeOfDay === 'AM' ? '#854F0B' : '#534AB7',
+                          }}>
                             {r.timeOfDay}
                           </span>
                         )}
@@ -807,7 +822,7 @@ export default function Routines() {
                         )}
                         {canEdit && (
                           <button
-                            onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text, timeOfDay: r.timeOfDay || 'AM', room: r.room || '' })}
+                            onClick={() => setHhModal({ frequency: freq, id: r.id, text: r.text, timeOfDay: r.timeOfDay || 'AM', room: r.room || '', zone: r.zone || '' })}
                             style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
                           >
                             Edit
@@ -817,7 +832,7 @@ export default function Routines() {
                     ))}
                     {canCreate && (
                       <button
-                        onClick={() => setHhModal({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null, room: '' })}
+                        onClick={() => setHhModal({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null, room: '', zone: '' })}
                         style={{ fontSize: '12px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
                       >
                         + Add {freq} routine
@@ -884,6 +899,19 @@ export default function Routines() {
                 ))}
               </div>
             )}
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 500, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Zone (optional)</div>
+              <select
+                className="form-select"
+                value={hhModal.zone || ''}
+                onChange={(e) => setHhModal({ ...hhModal, zone: e.target.value })}
+              >
+                <option value="">— None —</option>
+                {[1, 2, 3, 4, 5].map((z) => (
+                  <option key={z} value={z}>{z}</option>
+                ))}
+              </select>
+            </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               {hhModal.id && canEdit && (
                 <button
