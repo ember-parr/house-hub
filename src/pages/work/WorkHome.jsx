@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
-import { collection, query, orderBy, onSnapshot, doc, setDoc } from 'firebase/firestore'
+import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
+
+const ACTION_STATUSES = ['Not started', 'In progress', 'Blocked', 'Complete']
 
 const STATUS_CYCLE = {
   'Not started': 'In progress',
@@ -18,6 +20,16 @@ const STATUS_STYLES = {
   'In progress': { bg: '#EEEDFE',  color: '#534AB7' },
   'Blocked':     { bg: '#FAECE7',  color: '#993C1D' },
   'Complete':    { bg: '#EAF3DE',  color: '#3B6D11' },
+}
+
+const PRIORITIES = ['ASAP', 'High', 'Medium', 'Low', 'Lowest']
+
+const PRIORITY_STYLES = {
+  'ASAP':   { bg: '#FAECE7', color: '#993C1D' },
+  'High':   { bg: '#FAEEDA', color: '#854F0B' },
+  'Medium': { bg: '#f5f4f1', color: '#888'    },
+  'Low':    { bg: '#f5f4f1', color: '#aaa'    },
+  'Lowest': { bg: '#f5f4f1', color: '#bbb'    },
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
@@ -68,12 +80,12 @@ export default function WorkHome() {
   const [projects, setProjects]       = useState([])
   const [currentWeek, setCurrentWeek] = useState(() => getMonday(now))
   const [weekDataMap, setWeekDataMap] = useState({}) // { [projectId]: { actionItems, notes, recap } }
+  const rolledOverRef = useRef(null)  // tracks which wKey rollover has already run for
 
-  // Quick-add modals
-  const [actionModal, setActionModal] = useState(null)  // null | projectId
+  // Modals
+  // actionModal: null = closed | { projectId, id?, title, completeBy, status, priority }
+  const [actionModal, setActionModal] = useState(null)
   const [noteModal, setNoteModal]     = useState(null)  // null | projectId
-  const [actionTitle, setActionTitle] = useState('')
-  const [actionDate, setActionDate]   = useState('')
   const [noteText, setNoteText]       = useState('')
   const [noteFollowUp, setNoteFollowUp] = useState(false)
   const [saving, setSaving]           = useState(false)
@@ -113,6 +125,50 @@ export default function WorkHome() {
     return () => unsubscribers.forEach((unsub) => unsub())
   }, [user, projects, wKey])
 
+  // ── Rollover incomplete items from last week ─────────────────────────────────
+
+  useEffect(() => {
+    if (!user || projects.length === 0) return
+    const thisWeekKey = weekKey(getMonday(now))
+    if (wKey !== thisWeekKey) return           // only run for the current week
+    if (rolledOverRef.current === wKey) return // already ran this session
+
+    rolledOverRef.current = wKey
+
+    const lastMonday = new Date(currentWeek)
+    lastMonday.setDate(lastMonday.getDate() - 7)
+    const lastWKey = weekKey(lastMonday)
+
+    const run = async () => {
+      await Promise.all(projects.map(async (p) => {
+        const [lastSnap, currSnap] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid, 'workProjects', p.id, 'weekData', lastWKey)),
+          getDoc(doc(db, 'users', user.uid, 'workProjects', p.id, 'weekData', wKey)),
+        ])
+        if (!lastSnap.exists()) return
+
+        const incomplete = (lastSnap.data().actionItems || [])
+          .filter((i) => i.status !== 'Complete')
+        if (incomplete.length === 0) return
+
+        const currItems = currSnap.exists() ? (currSnap.data().actionItems || []) : []
+        const currIds   = new Set(currItems.map((i) => i.id))
+        const toAdd     = incomplete
+          .filter((i) => !currIds.has(i.id))
+          .map((i) => ({ ...i, rolledOver: true }))
+        if (toAdd.length === 0) return
+
+        await setDoc(
+          doc(db, 'users', user.uid, 'workProjects', p.id, 'weekData', wKey),
+          { actionItems: [...currItems, ...toAdd] },
+          { merge: true }
+        )
+      }))
+    }
+
+    run()
+  }, [user, projects, wKey])
+
   // ── Week navigation ──────────────────────────────────────────────────────────
 
   const navigateWeek = (dir) => {
@@ -130,9 +186,24 @@ export default function WorkHome() {
   }
 
   const openActionModal = (projectId) => {
-    setActionModal(projectId)
-    setActionTitle('')
-    setActionDate('')
+    setActionModal({
+      projectId,
+      title:      '',
+      completeBy: '',
+      status:     'Not started',
+      priority:   'Medium',
+    })
+  }
+
+  const openEditActionModal = (projectId, item) => {
+    setActionModal({
+      projectId,
+      id:         item.id,
+      title:      item.title,
+      completeBy: item.completeBy || '',
+      status:     item.status,
+      priority:   item.priority || 'Medium',
+    })
   }
 
   const openNoteModal = (projectId) => {
@@ -142,15 +213,45 @@ export default function WorkHome() {
   }
 
   const saveActionItem = async () => {
-    if (!actionTitle.trim() || !actionModal) return
+    if (!actionModal?.title?.trim()) return
     setSaving(true)
-    const wd    = weekDataMap[actionModal] || {}
-    const items = [...(wd.actionItems || []), {
-      id: newId(), title: actionTitle.trim(),
-      completeBy: actionDate || null, status: 'Not started',
-    }]
+    const wd    = weekDataMap[actionModal.projectId] || {}
+    const items = [...(wd.actionItems || [])]
+    if (actionModal.id) {
+      const idx = items.findIndex((i) => i.id === actionModal.id)
+      if (idx >= 0) {
+        items[idx] = {
+          ...items[idx],
+          title:      actionModal.title.trim(),
+          completeBy: actionModal.completeBy || null,
+          status:     actionModal.status,
+          priority:   actionModal.priority || 'Medium',
+        }
+      }
+    } else {
+      items.push({
+        id:         newId(),
+        title:      actionModal.title.trim(),
+        completeBy: actionModal.completeBy || null,
+        status:     actionModal.status,
+        priority:   actionModal.priority || 'Medium',
+      })
+    }
     await setDoc(
-      doc(db, 'users', user.uid, 'workProjects', actionModal, 'weekData', wKey),
+      doc(db, 'users', user.uid, 'workProjects', actionModal.projectId, 'weekData', wKey),
+      { actionItems: items }, { merge: true }
+    )
+    setActionModal(null)
+    setSaving(false)
+  }
+
+  const deleteActionItem = async () => {
+    if (!actionModal?.id) return
+    setSaving(true)
+    const wd    = weekDataMap[actionModal.projectId] || {}
+    const items = (wd.actionItems || []).filter((i) => i.id !== actionModal.id)
+    await setDoc(
+      doc(db, 'users', user.uid, 'workProjects', actionModal.projectId, 'weekData', wKey),
       { actionItems: items }, { merge: true }
     )
     setActionModal(null)
@@ -333,7 +434,7 @@ export default function WorkHome() {
                 <div style={sectionLabelStyle}>Action Items</div>
 
                 {activeItems.map((item) => (
-                  <ActionRow key={item.id} item={item} onCycle={() => cycleStatus(p.id, item)} />
+                  <ActionRow key={item.id} item={item} onCycle={() => cycleStatus(p.id, item)} onEdit={() => openEditActionModal(p.id, item)} />
                 ))}
 
                 {doneItems.length > 0 && (
@@ -342,7 +443,7 @@ export default function WorkHome() {
                       Complete · {doneItems.length}
                     </div>
                     {doneItems.map((item) => (
-                      <ActionRow key={item.id} item={item} onCycle={() => cycleStatus(p.id, item)} />
+                      <ActionRow key={item.id} item={item} onCycle={() => cycleStatus(p.id, item)} onEdit={() => openEditActionModal(p.id, item)} />
                     ))}
                   </>
                 )}
@@ -366,33 +467,75 @@ export default function WorkHome() {
           </div>
         )
       })}
-      {/* Add action item modal */}
+      {/* Add / edit action item modal */}
       {actionModal && (
         <div className="modal-overlay" onClick={() => setActionModal(null)}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="modal-handle" />
-            <h2 className="modal-title">New action item</h2>
+            <h2 className="modal-title">{actionModal.id ? 'Edit action item' : 'New action item'}</h2>
             <input
               className="form-input"
               placeholder="Title *"
-              value={actionTitle}
-              onChange={(e) => setActionTitle(e.target.value)}
+              value={actionModal.title}
+              onChange={(e) => setActionModal({ ...actionModal, title: e.target.value })}
               onKeyDown={(e) => { if (e.key === 'Enter') saveActionItem() }}
               autoFocus
             />
-            <div style={{ marginBottom: '12px' }}>
-              <div style={modalLabelStyle}>Due date (optional)</div>
-              <input
-                className="form-input"
-                style={{ margin: 0 }}
-                type="date"
-                value={actionDate}
-                onChange={(e) => setActionDate(e.target.value)}
-              />
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <div style={modalLabelStyle}>Due date (optional)</div>
+                <input
+                  className="form-input"
+                  style={{ margin: 0 }}
+                  type="date"
+                  value={actionModal.completeBy || ''}
+                  onChange={(e) => setActionModal({ ...actionModal, completeBy: e.target.value })}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={modalLabelStyle}>Priority</div>
+                <select
+                  className="form-select"
+                  style={{ width: '100%' }}
+                  value={actionModal.priority}
+                  onChange={(e) => setActionModal({ ...actionModal, priority: e.target.value })}
+                >
+                  {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </div>
             </div>
-            <button className="btn-primary" onClick={saveActionItem} disabled={saving || !actionTitle.trim()}>
-              {saving ? 'Saving...' : 'Add action item'}
-            </button>
+            {actionModal.id && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={modalLabelStyle}>Status</div>
+                <select
+                  className="form-select"
+                  style={{ width: '100%' }}
+                  value={actionModal.status}
+                  onChange={(e) => setActionModal({ ...actionModal, status: e.target.value })}
+                >
+                  {ACTION_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {actionModal.id && (
+                <button
+                  onClick={deleteActionItem}
+                  disabled={saving}
+                  style={{ background: 'none', border: '0.5px solid #f5c5c5', borderRadius: '8px', padding: '9px 14px', fontSize: '13px', color: '#c0392b', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Delete
+                </button>
+              )}
+              <button
+                className="btn-primary"
+                style={{ flex: 1, margin: 0 }}
+                onClick={saveActionItem}
+                disabled={saving || !actionModal.title?.trim()}
+              >
+                {saving ? 'Saving...' : (actionModal.id ? 'Save changes' : 'Add action item')}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -441,12 +584,27 @@ const modalLabelStyle = {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
-function ActionRow({ item, onCycle }) {
+function ActionRow({ item, onCycle, onEdit }) {
   const isDone  = item.status === 'Complete'
   const sStyle  = STATUS_STYLES[item.status] || STATUS_STYLES['Not started']
+  const priority = item.priority || 'Medium'
+  const pStyle   = PRIORITY_STYLES[priority] || PRIORITY_STYLES['Medium']
+  const isAsap   = priority === 'ASAP' && !isDone
+  const isHigh   = priority === 'High' && !isDone
+
+  const rowStyle = isAsap
+    ? {
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        padding: '7px 10px', margin: '4px -8px', borderRadius: '8px',
+        background: '#FDEEEA', borderLeft: '3px solid #993C1D',
+      }
+    : {
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        padding: '7px 0', borderBottom: '0.5px solid #f5f4f1',
+      }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '7px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+    <div style={rowStyle}>
       <button
         onClick={onCycle}
         style={{
@@ -466,6 +624,7 @@ function ActionRow({ item, onCycle }) {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: '13px', fontWeight: 500, opacity: isDone ? 0.45 : 1, textDecoration: isDone ? 'line-through' : 'none' }}>
+          {isHigh && <span style={{ marginRight: '4px' }}>🚩</span>}
           {item.title}
         </div>
         <div style={{ display: 'flex', gap: '6px', marginTop: '3px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -479,13 +638,35 @@ function ActionRow({ item, onCycle }) {
           >
             {item.status}
           </button>
+          {priority !== 'Medium' && !isDone && (
+            <span
+              style={{
+                fontSize: '10px', fontWeight: 500, padding: '2px 8px', borderRadius: '20px',
+                background: pStyle.bg, color: pStyle.color,
+              }}
+            >
+              {priority}
+            </span>
+          )}
           {item.completeBy && (
             <span style={{ fontSize: '11px', color: '#bbb' }}>
               Due {new Date(item.completeBy + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
           )}
+          {item.rolledOver && (
+            <span style={{ fontSize: '10px', color: '#bbb' }}>↩ carried over</span>
+          )}
         </div>
       </div>
+
+      {onEdit && (
+        <button
+          onClick={onEdit}
+          style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', flexShrink: 0 }}
+        >
+          Edit
+        </button>
+      )}
     </div>
   )
 }

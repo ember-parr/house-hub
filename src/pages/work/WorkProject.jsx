@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'
+import { doc, getDoc, setDoc, onSnapshot, getDocs, collection } from 'firebase/firestore'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -20,6 +20,18 @@ const STATUS_STYLES = {
   'In progress': { bg: '#EEEDFE',  color: '#534AB7' },
   'Blocked':     { bg: '#FAECE7',  color: '#993C1D' },
   'Complete':    { bg: '#EAF3DE',  color: '#3B6D11' },
+}
+
+const PRIORITIES = ['ASAP', 'High', 'Medium', 'Low', 'Lowest']
+
+const PRIORITY_RANK = { 'ASAP': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Lowest': 4 }
+
+const PRIORITY_STYLES = {
+  'ASAP':   { bg: '#FAECE7', color: '#993C1D' },
+  'High':   { bg: '#FAEEDA', color: '#854F0B' },
+  'Medium': { bg: '#f5f4f1', color: '#888'    },
+  'Low':    { bg: '#f5f4f1', color: '#aaa'    },
+  'Lowest': { bg: '#f5f4f1', color: '#bbb'    },
 }
 
 const labelStyle = {
@@ -109,6 +121,9 @@ export default function WorkProject() {
   const [recap, setRecap]         = useState('')
   const [recapSaved, setRecapSaved] = useState(false)
 
+  // Incomplete items from past weeks (other than the currently-viewed week)
+  const [pastIncomplete, setPastIncomplete] = useState([])
+
   // ── Load project ────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -156,6 +171,37 @@ export default function WorkProject() {
     return unsub
   }, [user, projectId, wKey])
 
+  // ── Past incomplete (other weeks) ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (!user || !projectId || !wKey) return
+    let cancelled = false
+    const load = async () => {
+      const snap = await getDocs(
+        collection(db, 'users', user.uid, 'workProjects', projectId, 'weekData')
+      )
+      const currIds = new Set((weekData.actionItems || []).map((i) => i.id))
+      const collected = []
+      snap.docs.forEach((d) => {
+        if (d.id === wKey) return
+        ;(d.data().actionItems || []).forEach((i) => {
+          if (i.status !== 'Complete' && !currIds.has(i.id)) {
+            collected.push({ ...i, weekDocId: d.id })
+          }
+        })
+      })
+      collected.sort((a, b) => {
+        if (a.weekDocId !== b.weekDocId) return b.weekDocId.localeCompare(a.weekDocId)
+        const pa = PRIORITY_RANK[a.priority] ?? 2
+        const pb = PRIORITY_RANK[b.priority] ?? 2
+        return pa - pb
+      })
+      if (!cancelled) setPastIncomplete(collected)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [user, projectId, wKey, weekData])
+
   // ── Week navigation ─────────────────────────────────────────────────────────
 
   const activeWeeks = (project?.startDate && project?.endDate)
@@ -169,6 +215,13 @@ export default function WorkProject() {
   const navigateWeek = (dir) => {
     const idx = currentIdx + dir
     if (idx >= 0 && idx < activeWeeks.length) setCurrentWeek(activeWeeks[idx])
+  }
+
+  const jumpToWeek = (weekDocId) => {
+    const monday = parseLocalDate(weekDocId)
+    if (!monday) return
+    setCurrentWeek(monday)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   // ── Firestore writer ────────────────────────────────────────────────────────
@@ -195,6 +248,7 @@ export default function WorkProject() {
           title:      actionModal.title.trim(),
           completeBy: actionModal.completeBy || null,
           status:     actionModal.status,
+          priority:   actionModal.priority || 'Medium',
         }
       }
     } else {
@@ -203,6 +257,7 @@ export default function WorkProject() {
         title:      actionModal.title.trim(),
         completeBy: actionModal.completeBy || null,
         status:     actionModal.status,
+        priority:   actionModal.priority || 'Medium',
         createdAt:  new Date().toISOString(),
       })
     }
@@ -343,7 +398,7 @@ export default function WorkProject() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
               <div className="profile-section-title" style={{ margin: 0 }}>Action Items</div>
               <button
-                onClick={() => setActionModal({ title: '', completeBy: getWeekFriday(currentWeek), status: 'Not started' })}
+                onClick={() => setActionModal({ title: '', completeBy: getWeekFriday(currentWeek), status: 'Not started', priority: 'Medium' })}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}
               >
@@ -452,6 +507,79 @@ export default function WorkProject() {
               onChange={(e) => setRecap(e.target.value)}
             />
           </div>
+
+          {/* ── Past Incomplete ── */}
+          {pastIncomplete.length > 0 && (
+            <div className="profile-card" style={{ marginTop: '12px' }}>
+              <div className="profile-section-title">
+                Past incomplete · {pastIncomplete.length}
+              </div>
+              <div style={{ fontSize: '11px', color: '#aaa', marginBottom: '8px' }}>
+                Items from previous weeks that haven't been completed. Tap to jump to that week.
+              </div>
+              {pastIncomplete.map((item) => {
+                const priority = item.priority || 'Medium'
+                const isAsap   = priority === 'ASAP'
+                const isHigh   = priority === 'High'
+                const sStyle   = STATUS_STYLES[item.status] || STATUS_STYLES['Not started']
+                const pStyle   = PRIORITY_STYLES[priority] || PRIORITY_STYLES['Medium']
+                const monday   = parseLocalDate(item.weekDocId)
+                const weekStr  = monday
+                  ? monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  : item.weekDocId
+
+                const rowStyle = isAsap
+                  ? {
+                      display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      padding: '8px 10px', margin: '4px -8px', borderRadius: '8px',
+                      background: '#FDEEEA', borderLeft: '3px solid #993C1D',
+                      cursor: 'pointer',
+                    }
+                  : {
+                      display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      padding: '8px 0', borderBottom: '0.5px solid #f5f4f1',
+                      cursor: 'pointer',
+                    }
+
+                return (
+                  <div
+                    key={`${item.weekDocId}-${item.id}`}
+                    style={rowStyle}
+                    onClick={() => jumpToWeek(item.weekDocId)}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 500 }}>
+                        {isHigh && <span style={{ marginRight: '4px' }}>🚩</span>}
+                        {item.title}
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{
+                          fontSize: '10px', fontWeight: 500, padding: '2px 8px', borderRadius: '20px',
+                          background: sStyle.bg, color: sStyle.color,
+                        }}>
+                          {item.status}
+                        </span>
+                        {priority !== 'Medium' && (
+                          <span style={{
+                            fontSize: '10px', fontWeight: 500, padding: '2px 8px', borderRadius: '20px',
+                            background: pStyle.bg, color: pStyle.color,
+                          }}>
+                            {priority}
+                          </span>
+                        )}
+                        <span style={{ fontSize: '11px', color: '#bbb' }}>
+                          Week of {weekStr}
+                        </span>
+                      </div>
+                    </div>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="2" strokeLinecap="round" style={{ width: 14, height: 14, flexShrink: 0, marginTop: '4px' }}>
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -491,6 +619,17 @@ export default function WorkProject() {
                   {ACTION_STATUSES.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </div>
+            </div>
+            <div style={{ marginTop: '12px' }}>
+              <div style={labelStyle}>Priority</div>
+              <select
+                className="form-select"
+                style={{ width: '100%' }}
+                value={actionModal.priority || 'Medium'}
+                onChange={(e) => setActionModal({ ...actionModal, priority: e.target.value })}
+              >
+                {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+              </select>
             </div>
             <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
               {actionModal.id && (
@@ -569,9 +708,24 @@ export default function WorkProject() {
 function ActionRow({ item, onCycle, onEdit }) {
   const isDone  = item.status === 'Complete'
   const sStyle  = STATUS_STYLES[item.status] || STATUS_STYLES['Not started']
+  const priority = item.priority || 'Medium'
+  const pStyle   = PRIORITY_STYLES[priority] || PRIORITY_STYLES['Medium']
+  const isAsap   = priority === 'ASAP' && !isDone
+  const isHigh   = priority === 'High' && !isDone
+
+  const rowStyle = isAsap
+    ? {
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        padding: '8px 10px', margin: '4px -8px', borderRadius: '8px',
+        background: '#FDEEEA', borderLeft: '3px solid #993C1D',
+      }
+    : {
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        padding: '8px 0', borderBottom: '0.5px solid #f5f4f1',
+      }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+    <div style={rowStyle}>
       {/* Circle toggle */}
       <button
         onClick={() => onCycle(item)}
@@ -592,6 +746,7 @@ function ActionRow({ item, onCycle, onEdit }) {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: '13px', fontWeight: 500, opacity: isDone ? 0.45 : 1, textDecoration: isDone ? 'line-through' : 'none' }}>
+          {isHigh && <span style={{ marginRight: '4px' }}>🚩</span>}
           {item.title}
         </div>
         <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -605,6 +760,16 @@ function ActionRow({ item, onCycle, onEdit }) {
           >
             {item.status}
           </button>
+          {priority !== 'Medium' && !isDone && (
+            <span
+              style={{
+                fontSize: '10px', fontWeight: 500, padding: '2px 8px', borderRadius: '20px',
+                background: pStyle.bg, color: pStyle.color,
+              }}
+            >
+              {priority}
+            </span>
+          )}
           {item.completeBy && (
             <span style={{ fontSize: '11px', color: '#bbb' }}>
               Due {new Date(item.completeBy + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -614,7 +779,7 @@ function ActionRow({ item, onCycle, onEdit }) {
       </div>
 
       <button
-        onClick={() => onEdit({ id: item.id, title: item.title, completeBy: item.completeBy || '', status: item.status })}
+        onClick={() => onEdit({ id: item.id, title: item.title, completeBy: item.completeBy || '', status: item.status, priority: item.priority || 'Medium' })}
         style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', flexShrink: 0 }}
       >
         Edit

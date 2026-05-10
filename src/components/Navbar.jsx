@@ -44,6 +44,8 @@ const navItems = [
       { to: '/Lists/Inventory', label: 'Inventory' },
       { to: '/Lists/Shopping', label: 'Shopping Lists' },
       { to: '/Lists/Wishlist', label: 'Wish Lists' },
+      { to: '/Lists/HouseNotes', label: 'House Notes' },
+      { to: '/Lists/PersonalNotes', label: 'Personal Notes' },
     ],
   },
   {

@@ -90,6 +90,12 @@ function getActiveZone(date) {
 
 const TODO_CATEGORIES = ['General', 'Personal', 'Household', 'Work', 'Health', 'Errands']
 
+const PRIORITY_RANK = { 'ASAP': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Lowest': 4 }
+const PRIORITY_BADGE = {
+  'ASAP': { bg: '#FAECE7', color: '#993C1D' },
+  'High': { bg: '#FAEEDA', color: '#854F0B' },
+}
+
 function TaskRow({ todo, onComplete, todayStr, tomorrowStr }) {
   const isOverdue  = todo.endDate < todayStr
   const isToday    = todo.endDate === todayStr
@@ -251,12 +257,21 @@ export default function Home() {
         const snap = await getDocs(collection(db, 'users', user.uid, 'workProjects', p.id, 'weekData'))
         snap.docs.forEach((d) => {
           ;(d.data().actionItems || []).forEach((item) => {
-            if (item.status !== 'Complete' && item.completeBy && item.completeBy <= tomorrowStr) {
+            if (item.status === 'Complete') return
+            const isHighPri = item.priority === 'ASAP' || item.priority === 'High'
+            const isDueSoon = item.completeBy && item.completeBy <= tomorrowStr
+            if (isDueSoon || isHighPri) {
               all.push({ ...item, projectId: p.id, projectName: p.name, weekDocId: d.id })
             }
           })
         })
       }))
+      all.sort((a, b) => {
+        const ap = PRIORITY_RANK[a.priority] ?? 2
+        const bp = PRIORITY_RANK[b.priority] ?? 2
+        if (ap !== bp) return ap - bp
+        return (a.completeBy || '9999-12-31').localeCompare(b.completeBy || '9999-12-31')
+      })
       if (!cancelled) setWorkActionItems(all)
     }
     load()
@@ -490,27 +505,48 @@ export default function Home() {
               <div style={{ fontSize: '11px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', marginTop: '10px' }}>
                 Work Projects
               </div>
-              {workActionItems.map((item) => (
-                <div key={`${item.projectId}-${item.id}`} className="task-card" style={{ marginBottom: '6px' }}>
-                  <button
-                    className="task-check"
-                    onClick={() => markWorkItemDone(item)}
-                    aria-label="Mark complete"
-                  />
-                  <div className="task-body">
-                    <div className="task-title">{item.title}</div>
-                    <div className="task-meta">
-                      <span style={{ fontSize: '10px', color: '#aaa' }}>{item.projectName}</span>
-                      <span style={{
-                        fontSize: '10px', fontWeight: 500,
-                        color: item.completeBy < todayStr ? '#993C1D' : item.completeBy === todayStr ? '#534AB7' : '#888',
-                      }}>
-                        {item.completeBy < todayStr ? 'Overdue' : item.completeBy === todayStr ? 'Today' : 'Tomorrow'}
-                      </span>
+              {workActionItems.map((item) => {
+                const isAsap = item.priority === 'ASAP'
+                const isHigh = item.priority === 'High'
+                const pBadge = PRIORITY_BADGE[item.priority]
+                const cardStyle = isAsap
+                  ? { marginBottom: '6px', background: '#FDEEEA', borderLeft: '3px solid #993C1D' }
+                  : { marginBottom: '6px' }
+                return (
+                  <div key={`${item.projectId}-${item.id}`} className="task-card" style={cardStyle}>
+                    <button
+                      className="task-check"
+                      onClick={() => markWorkItemDone(item)}
+                      aria-label="Mark complete"
+                    />
+                    <div className="task-body">
+                      <div className="task-title">
+                        {isHigh && <span style={{ marginRight: '4px' }}>🚩</span>}
+                        {item.title}
+                      </div>
+                      <div className="task-meta">
+                        <span style={{ fontSize: '10px', color: '#aaa' }}>{item.projectName}</span>
+                        {item.completeBy && (
+                          <span style={{
+                            fontSize: '10px', fontWeight: 500,
+                            color: item.completeBy < todayStr ? '#993C1D' : item.completeBy === todayStr ? '#534AB7' : '#888',
+                          }}>
+                            {item.completeBy < todayStr ? 'Overdue' : item.completeBy === todayStr ? 'Today' : 'Tomorrow'}
+                          </span>
+                        )}
+                        {pBadge && (
+                          <span style={{
+                            fontSize: '10px', fontWeight: 500, padding: '1px 6px', borderRadius: '20px',
+                            background: pBadge.bg, color: pBadge.color,
+                          }}>
+                            {item.priority}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

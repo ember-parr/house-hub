@@ -3,17 +3,64 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
-    match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2026, 5, 10);
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
     }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('userType', '') == 'admin';
+    }
+
+    // ── User profiles & private subcollections ──────────────────────
+
+    // Profile docs are readable by any signed-in member (used to render the
+    // household member list and look up another user's color/initials).
+    // Each user can create/update only their own profile. The userType field
+    // is protected: it can be set on create or by an admin, but a non-admin
+    // cannot change their existing userType (prevents self-promotion).
+    match /users/{uid} {
+      allow read:   if isSignedIn();
+      allow create: if isSelf(uid);
+      allow update: if (
+                        isSelf(uid)
+                        && request.resource.data.get('userType', '') == resource.data.get('userType', '')
+                      ) || isAdmin();
+      allow delete: if isAdmin();
+
+      // All user subcollections (routines, workProjects, workProjects/*/weekData,
+      // routineCompletions, …) are private to that user.
+      match /{subPath=**} {
+        allow read, write: if isSelf(uid);
+      }
+    }
+
+    // ── Household-shared collections ────────────────────────────────
+    // Any signed-in member can read and write. UI-level gating (admin-only
+    // create buttons for bills, maintenance, etc.) is enforced client-side
+    // via useUserRole; tighten these rules later if you want server-side
+    // role enforcement on writes.
+
+    match /todos/{doc=**}                         { allow read, write: if isSignedIn(); }
+    match /shopping/{doc=**}                      { allow read, write: if isSignedIn(); }
+    match /wishlist/{doc=**}                      { allow read, write: if isSignedIn(); }
+    match /householdRoutines/{doc=**}             { allow read, write: if isSignedIn(); }
+    match /householdRoutineTracking/{doc=**}      { allow read, write: if isSignedIn(); }
+    match /householdRoutineYearTracking/{doc=**}  { allow read, write: if isSignedIn(); }
+    match /householdConfig/{doc=**}               { allow read, write: if isSignedIn(); }
+    match /householdNotes/{doc=**}                { allow read, write: if isSignedIn(); }
+    match /maintenance/{doc=**}                   { allow read, write: if isSignedIn(); }
+    match /bills/{doc=**}                         { allow read, write: if isSignedIn(); }
+    match /billRecords/{doc=**}                   { allow read, write: if isSignedIn(); }
+    match /amexTransactions/{doc=**}              { allow read, write: if isSignedIn(); }
+    match /spendingTransactions/{doc=**}          { allow read, write: if isSignedIn(); }
+    match /loan/{doc=**}                          { allow read, write: if isSignedIn(); }
   }
 }
