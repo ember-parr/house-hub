@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Shared household note attachments — any signed-in member.
+    // 25 MB cap per file.
+    match /householdNotes/{noteId}/{fileName} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn()
+                    && (request.resource == null || request.resource.size < 25 * 1024 * 1024);
+    }
+
+    // Private per-user note attachments — owner only.
+    match /users/{uid}/personalNotes/{noteId}/{fileName} {
+      allow read:  if isSelf(uid);
+      allow write: if isSelf(uid)
+                    && (request.resource == null || request.resource.size < 25 * 1024 * 1024);
+    }
+  }
+}
