@@ -767,3 +767,20 @@ a { text-decoration: none; color: inherit; }
   cursor: pointer;
   color: #888;
 }
+
+/* ── Rich text content (editor + view) ── */
+/* Scoped under .rich-text-content so heading sizes etc. don't collide with
+   the rest of the app (which uses h1 for page titles). */
+.rich-text-content h1 { font-size: 19px; font-weight: 700; margin: 12px 0 6px; line-height: 1.3; }
+.rich-text-content h2 { font-size: 16px; font-weight: 700; margin: 10px 0 5px; line-height: 1.3; }
+.rich-text-content h3 { font-size: 14px; font-weight: 600; margin:  8px 0 4px; line-height: 1.3; }
+.rich-text-content p  { margin: 6px 0; }
+.rich-text-content ul,
+.rich-text-content ol { margin: 6px 0; padding-left: 22px; }
+.rich-text-content li { margin: 2px 0; }
+.rich-text-content input[type="checkbox"] {
+  margin-right: 6px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.rich-text-content .rte-task { margin: 4px 0; }

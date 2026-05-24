@@ -19,6 +19,9 @@ import Loan from './pages/finances/LoanTracking'
 import Bills from './pages/finances/MonthlyBills'
 import Spending from './pages/finances/SpendingTracking'
 import Work from './pages/Work/WorkHome'
+import WorkProject from './pages/Work/WorkProject'
+import HouseNotes from './pages/lists/HouseNotes'
+import PersonalNotes from './pages/lists/PersonalNotes'
 
 function App() {
   return (
@@ -44,12 +47,15 @@ function App() {
                       <Route path="/lists/inventory" element={<Inventory />} />
                       <Route path="/lists/shopping" element={<Shopping />} />
                       <Route path="/lists/Wishlist" element={<Wishlist />} />
+                      <Route path="/lists/HouseNotes" element= {<HouseNotes />} />
+                      <Route path="lists/PersonalNotes" element= {<PersonalNotes />} />
                       <Route path="/finances" element={<Finances />} />
                       <Route path="/finances/amex" element={<Amex />} />
                       <Route path="/finances/loan" element={<Loan />} />
                       <Route path="/finances/bills" element={<Bills />} />
                       <Route path="/finances/spending" element={<Spending />} />
                       <Route path="/work" element={<Work />} />
+                      <Route path="/work/:projectId" element={<WorkProject />} />
                     </Routes>
                   </main>
                 </div>

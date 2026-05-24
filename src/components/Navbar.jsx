@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { db } from '../firebase'
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore'
 
 const navItems = [
   {
@@ -42,6 +44,8 @@ const navItems = [
       { to: '/Lists/Inventory', label: 'Inventory' },
       { to: '/Lists/Shopping', label: 'Shopping Lists' },
       { to: '/Lists/Wishlist', label: 'Wish Lists' },
+      { to: '/Lists/HouseNotes', label: 'House Notes' },
+      { to: '/Lists/PersonalNotes', label: 'Personal Notes' },
     ],
   },
   {
@@ -111,8 +115,30 @@ export default function Navbar() {
   const { user, logOut } = useAuth()
 
   const [openDropdown, setOpenDropdown] = useState(null)
-  const toggleDropdown = (label) =>
-    setOpenDropdown(label)
+  const [workProjects, setWorkProjects] = useState([])
+
+  const toggleDropdown = (label) => setOpenDropdown(label)
+
+  useEffect(() => {
+    if (!user) return
+    const q = query(collection(db, 'users', user.uid, 'workProjects'), orderBy('createdAt'))
+    return onSnapshot(q, (snap) => {
+      setWorkProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [user])
+
+  const todayStr = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
+  const activeWorkProjects = workProjects.filter((p) => !p.endDate || p.endDate >= todayStr)
+
+  const items = navItems.map((item) =>
+    item.label === 'Work'
+      ? { ...item, children: activeWorkProjects.length > 0 ? activeWorkProjects.map((p) => ({ to: `/work/${p.id}`, label: p.name })) : undefined }
+      : item
+  )
 
 
 
@@ -124,7 +150,7 @@ export default function Navbar() {
       <header className="desktop-nav">
         <div className="desktop-nav-logo">Mountain<span>Flax</span></div>
         <nav className="desktop-nav-links" >
-          {navItems.map((item) =>
+          {items.map((item) =>
             item.children ? (
               <div key={item.label} className="desktop-nav-dropdown"
                 onMouseEnter={() => toggleDropdown(item.label)}
@@ -169,7 +195,7 @@ export default function Navbar() {
 
       {/* Mobile bottom bar — keep exactly the same as before */}
       <nav className="mobile-nav">
-        {navItems.map((item) => (
+        {items.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

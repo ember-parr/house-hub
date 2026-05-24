@@ -1,9 +1,12 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { useUserRole } from '../../hooks/useUserRole'
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
+import {
+  collection, addDoc, getDocs, query, where, orderBy,
+  serverTimestamp,
+} from 'firebase/firestore'
 
 // ── Categories & guessing ────────────────────────────────────
 const CATEGORIES = [
@@ -12,17 +15,17 @@ const CATEGORIES = [
 ]
 
 const KEYWORDS = {
-  Grocery:        ['kroger', 'safeway', 'whole foods', 'trader joe', 'walmart', 'target', 'costco', 'king soopers', 'hellofresh', 'albertsons', 'publix', 'aldi', 'heb', 'wegmans', 'grocery', 'market'],
+  Grocery:        ['kroger', 'safeway', 'whole foods', 'trader joe', 'walmart', 'target', 'costco', 'king soopers', 'hellofresh', 'home chef', 'albertsons', 'publix', 'aldi', 'heb', 'wegmans', 'grocery', 'market'],
   Dining:         ['restaurant', 'cafe', 'coffee', 'starbucks', 'mcdonald', 'chick-fil', 'chipotle', 'subway', 'pizza', 'doordash', 'grubhub', 'uber eats', 'taco', 'burger', 'sushi', 'diner', 'grill', 'bistro', 'kitchen', 'eatery', 'shake shack', 'jimmy john', 'chicken', 'dave buster'],
-  Transportation: ['shell', 'chevron', 'exxon', 'bp ', 'sunoco', 'circle k', 'gas station', 'fuel', '76 '],
+  Transportation: ['shell', 'chevron', 'exxon', 'bp ', 'sunoco', 'circle k', 'gas station', 'fuel', '76 ', 'quiktrip'],
   Pets:           ['petco', 'petsmart', 'pet supplies', 'banfield', 'veterinary', 'vet ', 'animal hospital', 'pet store'],
   Shopping:       ['amazon', 'ebay', 'etsy', 'best buy', 'home depot', "lowe's", 'ikea', 'nordstrom', 'macy', 'gap ', 'old navy', 'zara', 'h&m', 'tiktok'],
-  Bill:           ['electric', 'gas & electric', 'water', 'internet', 'comcast', 'BLACKHILLS', 'att ', 'payment', 'forcebb', 'MOUNTAIN VIEW ELEC', 'utility', 'onemain', 'klarna'],
-  Subscription:   ['netflix', 'hulu', 'youtube', 'cricut', 'hp', 'spotify', 'apple.com', 'adobe', 'health', 'urgent care', 'audible'],
+  Bill:           ['electric', 'gas & electric', 'water', 'internet', 'comcast', 'BLACKHILLS', 'att ', 'payment', 'forcebb', 'MOUNTAIN VIEW ELEC', 'utility', 'onemain', 'henry', 'klarna', 'prog direct', 'town of monument'],
+  Subscription:   ['netflix', 'hulu', 'youtube', 'cricut', 'hp', 'spotify', 'apple.com', 'adobe', 'health', 'urgent care', 'audible', 'anthropic', 'MADISON REED', 'claude'],
   Entertainment:  ['steam', 'ticketmaster', 'cinema', 'theater', 'amc '],
   Spaulding:      ['airline', 'united ', 'delta ', 'southwest', 'american air', 'hotel', 'marriott', 'hilton', 'airbnb', 'uber ', 'lyft', 'parking', 'navan', 'NVN* TRP FEE'],
-  Aiden:          ['school bucks', 'lewis palmer', 'lpms'],
-  Transfer:       ['zelle', 'venmo', 'transfer', 'deposit from', 'deposit to'],
+  Aiden:          ['school bucks', 'lewis palmer', 'lpms', 'apple cash sent money'],
+  Transfer:       ['zelle', 'venmo', 'transfer', 'deposit from', 'deposit to', 'XX0245', 'XX2813'],
 }
 
 function guessCategory(description) {
@@ -100,6 +103,18 @@ function fmt(n) {
   return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function effectiveBillStatus(bill, record, year, month) {
+  const stored = record?.status || 'unpaid'
+  if (stored === 'autopay') {
+    const today = new Date()
+    const dueDate = new Date(year, month, Number(bill.dueDay))
+    if (today < dueDate) return 'scheduled'
+  }
+  return stored
+}
+
+const EXCLUDE_SPEND_CATS = new Set(['Bill', 'Spaulding', 'Transfer', 'Subscription'])
+
 // ── Nav cards ────────────────────────────────────────────────
 const sections = [
   {
@@ -163,6 +178,32 @@ export default function Finances() {
   const [csvAccount, setCsvAccount] = useState('Checking')
   const [saving, setSaving]       = useState(false)
   const fileRef = useRef(null)
+
+  const [bills, setBills]           = useState([])
+  const [billRecords, setBillRecords] = useState([])
+  const [spendTx, setSpendTx]       = useState([])
+
+  useEffect(() => {
+    getDocs(query(collection(db, 'bills'), orderBy('dueDay'))).then((snap) => {
+      setBills(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [])
+
+  useEffect(() => {
+    const now = new Date()
+    const curKey  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const next    = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    const nextKey = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`
+    getDocs(query(collection(db, 'billRecords'), where('month', 'in', [curKey, nextKey]))).then((snap) => {
+      setBillRecords(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [])
+
+  useEffect(() => {
+    getDocs(query(collection(db, 'spendingTransactions'), where('type', '==', 'spend'))).then((snap) => {
+      setSpendTx(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    })
+  }, [])
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0]
@@ -385,17 +426,107 @@ export default function Finances() {
         </div>
       )}
 
-      {!csvRows && (
-        <div className="dashboard-grid">
-          {sections.map((section) => (
-            <Link key={section.to} to={section.to} className={`dashboard-card ${section.colorClass}`}>
-              <div className="card-icon">{section.icon}</div>
-              <div className="card-title">{section.title}</div>
-              <div className="card-subtitle">{section.subtitle}</div>
-            </Link>
-          ))}
-        </div>
-      )}
+      {!csvRows && (() => {
+        // ── Bills due in next 7 days ──────────────────────────
+        const now = new Date(); now.setHours(0, 0, 0, 0)
+        const in7 = new Date(now); in7.setDate(in7.getDate() + 7)
+
+        const dueSoonBills = []
+        for (const bill of bills) {
+          for (let offset = 0; offset <= 1; offset++) {
+            const d = new Date(now.getFullYear(), now.getMonth() + offset, Number(bill.dueDay))
+            if (d >= now && d <= in7) {
+              const y = d.getFullYear(), m = d.getMonth()
+              const mKey = `${y}-${String(m + 1).padStart(2, '0')}`
+              const rec = billRecords.find((r) => r.billId === bill.id && r.month === mKey)
+              const eff = effectiveBillStatus(bill, rec, y, m)
+              if (eff !== 'paid') dueSoonBills.push({ ...bill, eff, dueDate: d })
+              break
+            }
+          }
+        }
+        dueSoonBills.sort((a, b) => a.dueDate - b.dueDate)
+
+        // ── Avg monthly spend by category ────────────────────
+        const filteredSpend = spendTx.filter((t) => !EXCLUDE_SPEND_CATS.has(t.category))
+        const distinctMonths = Math.max(new Set(spendTx.map((t) => t.month)).size, 1)
+        const catTotals = {}
+        for (const t of filteredSpend) {
+          catTotals[t.category] = (catTotals[t.category] || 0) + Number(t.amount)
+        }
+        const avgByCategory = Object.entries(catTotals)
+          .map(([cat, total]) => ({ cat, avg: total / distinctMonths }))
+          .sort((a, b) => b.avg - a.avg)
+
+        return (
+          <>
+            <div className="dashboard-grid">
+              {sections.map((section) => (
+                <Link key={section.to} to={section.to} className={`dashboard-card ${section.colorClass}`}>
+                  <div className="card-icon">{section.icon}</div>
+                  <div className="card-title">{section.title}</div>
+                  <div className="card-subtitle">{section.subtitle}</div>
+                </Link>
+              ))}
+            </div>
+            <br />
+            <hr />
+            <br />
+
+            {dueSoonBills.length > 0 && (
+              <div className="profile-card" style={{ marginBottom: '12px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#1A2920' }}>
+                  Due in the Next 7 Days
+                </div>
+                {dueSoonBills.map((bill, i) => {
+                  const dueDateStr = bill.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  const isScheduled = bill.eff === 'scheduled'
+                  return (
+                    <div key={bill.id} style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '9px 0',
+                      borderBottom: i < dueSoonBills.length - 1 ? '0.5px solid #f5f4f1' : 'none',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 500 }}>{bill.name}</div>
+                        <div style={{ fontSize: '11px', color: '#aaa' }}>Due {dueDateStr}</div>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 600 }}>${fmt(bill.amount)}</div>
+                      <span style={{
+                        fontSize: '10px', fontWeight: 500, padding: '2px 8px',
+                        borderRadius: '20px', flexShrink: 0,
+                        background: isScheduled ? '#E6F1FB' : '#FAECE7',
+                        color: isScheduled ? '#185FA5' : '#993C1D',
+                      }}>
+                        {isScheduled ? 'Autopay' : 'Unpaid'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {avgByCategory.length > 0 && (
+              <div className="profile-card">
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '2px', color: '#1A2920' }}>
+                  Avg Monthly Spend
+                </div>
+                <div style={{ fontSize: '11px', color: '#aaa', marginBottom: '14px' }}>
+                  Based on {distinctMonths} month{distinctMonths !== 1 ? 's' : ''} of data
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  {avgByCategory.map(({ cat, avg }) => (
+                    <div key={cat} style={{ background: '#faf9f7', borderRadius: '8px', padding: '10px 12px' }}>
+                      <div style={{ fontSize: '11px', color: '#888', marginBottom: '3px' }}>{cat}</div>
+                      <div style={{ fontSize: '16px', fontWeight: 600, color: '#1A2920' }}>${fmt(avg)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )
+      })()}
     </div>
   )
 }
