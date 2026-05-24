@@ -38,8 +38,38 @@ export default function RichTextEditor({ initialHtml, onChange }) {
     }
   }, [initialHtml])
 
+  // Persist checkbox state into the HTML. Clicking a checkbox toggles the
+  // `checked` DOM property, but that doesn't update the `checked` attribute
+  // that gets serialized into innerHTML — so we mirror it here.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const handle = (e) => {
+      const t = e.target
+      if (t.tagName === 'INPUT' && t.type === 'checkbox') {
+        if (t.checked) t.setAttribute('checked', '')
+        else t.removeAttribute('checked')
+        onChange(el.innerHTML || '')
+      }
+    }
+    el.addEventListener('change', handle)
+    return () => el.removeEventListener('change', handle)
+  }, [onChange])
+
   const exec = (cmd, arg = null) => {
     document.execCommand(cmd, false, arg)
+    ref.current?.focus()
+    onChange(ref.current?.innerHTML || '')
+  }
+
+  const insertTask = () => {
+    // A single task line. The browser closes the surrounding block (e.g. a
+    // <p>) and inserts this <div> as a sibling. Pressing Enter inside the
+    // line will create a regular new line, not another task — click the
+    // button again to add another.
+    document.execCommand('insertHTML', false,
+      '<div class="rte-task"><input type="checkbox"> &nbsp;</div>'
+    )
     ref.current?.focus()
     onChange(ref.current?.innerHTML || '')
   }
@@ -50,15 +80,19 @@ export default function RichTextEditor({ initialHtml, onChange }) {
         <ToolbarBtn label={<b>B</b>}    title="Bold (Ctrl/Cmd+B)" onClick={() => exec('bold')} />
         <ToolbarBtn label={<i>I</i>}    title="Italic (Ctrl/Cmd+I)" onClick={() => exec('italic')} />
         <ToolbarBtn label={<u>U</u>}    title="Underline (Ctrl/Cmd+U)" onClick={() => exec('underline')} />
-        <ToolbarBtn label="H"           title="Heading"          onClick={() => exec('formatBlock', '<h3>')} style={{ fontWeight: 600 }} />
+        <ToolbarBtn label="H1"          title="Heading 1"        onClick={() => exec('formatBlock', '<h1>')} style={{ fontWeight: 600 }} />
+        <ToolbarBtn label="H2"          title="Heading 2"        onClick={() => exec('formatBlock', '<h2>')} style={{ fontWeight: 600 }} />
+        <ToolbarBtn label="H3"          title="Heading 3"        onClick={() => exec('formatBlock', '<h3>')} style={{ fontWeight: 600 }} />
         <ToolbarBtn label="P"           title="Paragraph"        onClick={() => exec('formatBlock', '<p>')} />
         <ToolbarBtn label="• List"      title="Bulleted list"    onClick={() => exec('insertUnorderedList')} />
         <ToolbarBtn label="1. List"     title="Numbered list"    onClick={() => exec('insertOrderedList')} />
+        <ToolbarBtn label="☐ Task"     title="Checkbox task"    onClick={insertTask} />
         <ToolbarBtn label="↶"           title="Undo"             onClick={() => exec('undo')} />
         <ToolbarBtn label="↷"           title="Redo"             onClick={() => exec('redo')} />
       </div>
       <div
         ref={ref}
+        className="rich-text-content"
         contentEditable
         suppressContentEditableWarning
         onInput={() => onChange(ref.current?.innerHTML || '')}

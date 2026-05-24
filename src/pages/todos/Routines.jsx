@@ -22,6 +22,10 @@ function monthKey(year, month) {
   return `${year}-${String(month + 1).padStart(2, '0')}`
 }
 
+function ymd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function monthLabel(year, month) {
   return new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
@@ -77,12 +81,24 @@ export default function Routines() {
   const [completions, setCompletions] = useState({})
   const [collapsed, setCollapsed]     = useState(true)
 
+  // Daily recap (today + 3 days back)
+  const [recaps, setRecaps]                 = useState(null)  // null = loading; {} once loaded
+  const [recapDrafts, setRecapDrafts]       = useState({})
+  const [recapSaving, setRecapSaving]       = useState({})
+  const [recapSavedFlag, setRecapSavedFlag] = useState({})
+
   // Household management
   const [hhCollapsed, setHhCollapsed]         = useState(true)
   const [hhRoutines, setHhRoutines]           = useState([])
   const [hhModal, setHhModal]                 = useState(null)
   const [roomZones, setRoomZones]             = useState({})
   const [roomZonesCollapsed, setRoomZonesCollapsed] = useState(true)
+  const [hhRoomFilter, setHhRoomFilter]       = useState(null) // null = All, 'unassigned', or a room name
+
+  // Household tracker UI state
+  const [trackerRoomFilter, setTrackerRoomFilter]       = useState(null) // null = All, 'unassigned', or a room name
+  const [trackerFreqFilter, setTrackerFreqFilter]       = useState(null) // null = All, or one of HH_FREQUENCIES
+  const [collapsedTrackerRooms, setCollapsedTrackerRooms] = useState(() => new Set())
 
   // Household tracker
   const [trackerCompletions, setTrackerCompletions]         = useState({})
@@ -115,6 +131,68 @@ export default function Routines() {
     }
     load()
   }, [user, key])
+
+  // Daily recap — last 4 days (today + 3 past)
+  const recentDays = (() => {
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return Array.from({ length: 4 }, (_, i) => {
+      const d = new Date(today)
+      d.setDate(d.getDate() - i)
+      return { key: ymd(d), date: d }
+    })
+  })()
+  const recentDayKeysStr = recentDays.map((d) => d.key).join('|')
+
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    const load = async () => {
+      const keys = recentDayKeysStr.split('|')
+      const snaps = await Promise.all(
+        keys.map((k) => getDoc(doc(db, 'users', user.uid, 'dailyRecaps', k)))
+      )
+      if (cancelled) return
+      const map = {}
+      const drafts = {}
+      snaps.forEach((s, i) => {
+        const k = keys[i]
+        const data = s.exists() ? s.data() : null
+        map[k] = data
+        if (data) drafts[k] = data.content || ''
+      })
+      setRecaps(map)
+      // Preserve any in-progress drafts the user has typed but not saved.
+      setRecapDrafts((prev) => ({ ...drafts, ...prev }))
+    }
+    load()
+    return () => { cancelled = true }
+  }, [user, recentDayKeysStr])
+
+  const saveRecap = async (recapKey) => {
+    const content = (recapDrafts[recapKey] || '').trim()
+    if (!content || !user) return
+    setRecapSaving((p) => ({ ...p, [recapKey]: true }))
+    const existing = recaps?.[recapKey]
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid, 'dailyRecaps', recapKey),
+        {
+          date: recapKey,
+          content,
+          updatedAt: serverTimestamp(),
+          ...(existing ? {} : { createdAt: serverTimestamp() }),
+        },
+        { merge: true }
+      )
+      setRecaps((p) => ({ ...(p || {}), [recapKey]: { ...(p?.[recapKey] || {}), date: recapKey, content } }))
+      setRecapSavedFlag((p) => ({ ...p, [recapKey]: true }))
+      setTimeout(() => {
+        setRecapSavedFlag((p) => ({ ...p, [recapKey]: false }))
+      }, 2000)
+    } finally {
+      setRecapSaving((p) => ({ ...p, [recapKey]: false }))
+    }
+  }
 
   // Household routines — real-time
   useEffect(() => {
@@ -832,6 +910,84 @@ export default function Routines() {
         )}
       </div>
 
+      {/* ── Daily Recap — always expanded ── */}
+      <div className="profile-card" style={{ marginBottom: '12px' }}>
+        <div className="profile-section-title">Daily Recap</div>
+        <div style={{ fontSize: '11px', color: '#aaa', marginBottom: '14px' }}>
+          One entry per day. Missed days can be filled in for up to 3 days.
+        </div>
+
+        {recaps === null ? (
+          <div style={{ fontSize: '13px', color: '#ccc' }}>Loading…</div>
+        ) : (
+          recentDays.map(({ key: dayKey, date }, idx) => {
+            const isToday   = idx === 0
+            const existing  = recaps[dayKey]
+            const readOnly  = !isToday && !!existing
+            const diff      = idx  // 0 = today, 1 = yesterday, etc.
+            const headline  = diff === 0
+              ? 'Today'
+              : diff === 1
+                ? 'Yesterday'
+                : date.toLocaleDateString('en-US', { weekday: 'long' })
+            const subline   = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+            return (
+              <div
+                key={dayKey}
+                style={{
+                  paddingTop:  idx === 0 ? 0 : '14px',
+                  marginTop:   idx === 0 ? 0 : '14px',
+                  borderTop:   idx === 0 ? 'none' : '0.5px solid #f5f4f1',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: isToday ? '#1a2920' : '#666' }}>{headline}</span>
+                    <span style={{ fontSize: '11px', color: '#bbb', marginLeft: '6px' }}>{subline}</span>
+                  </div>
+                  {recapSavedFlag[dayKey] && (
+                    <span style={{ fontSize: '11px', color: '#3B6D11' }}>✓ Saved</span>
+                  )}
+                  {!isToday && !existing && (
+                    <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 7px', borderRadius: '20px', background: '#FAEEDA', color: '#854F0B' }}>
+                      Missed
+                    </span>
+                  )}
+                </div>
+
+                {readOnly ? (
+                  <div style={{
+                    fontSize: '13px', color: '#444', whiteSpace: 'pre-wrap', lineHeight: 1.5,
+                    padding: '10px 12px', background: '#f5f4f1', borderRadius: '8px',
+                  }}>
+                    {existing.content}
+                  </div>
+                ) : (
+                  <>
+                    <textarea
+                      className="form-input"
+                      style={{ margin: 0, width: '100%', resize: 'vertical', minHeight: isToday ? '90px' : '70px', fontSize: '13px', boxSizing: 'border-box' }}
+                      placeholder={isToday ? 'How was today? Key wins, blockers, what to remember…' : 'Recap this day…'}
+                      value={recapDrafts[dayKey] || ''}
+                      onChange={(e) => setRecapDrafts((p) => ({ ...p, [dayKey]: e.target.value }))}
+                    />
+                    <button
+                      className="btn-primary"
+                      style={{ width: 'auto', padding: '6px 14px', marginTop: '6px', fontSize: '12px' }}
+                      onClick={() => saveRecap(dayKey)}
+                      disabled={recapSaving[dayKey] || !(recapDrafts[dayKey] || '').trim()}
+                    >
+                      {recapSaving[dayKey] ? 'Saving…' : (existing ? 'Save changes' : 'Save')}
+                    </button>
+                  </>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
+
       {/* ── Household Tracker — always expanded ── */}
       {canSeeHousehold && (
         <div className="profile-card" style={{ marginBottom: '12px' }}>
@@ -843,21 +999,137 @@ export default function Routines() {
             </div>
           )}
 
-          {/* Unassigned (no room) */}
-          {trackerUnassigned.length > 0 && renderTrackerGroup(trackerUnassigned)}
+          {/* Filter pills — room + frequency */}
+          {hhRoutines.length > 0 && (() => {
+            const pillStyle = (active, palette) => ({
+              padding: '5px 12px', borderRadius: '20px', border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap',
+              background: active ? palette.bg : '#f0ede8',
+              color:      active ? palette.color : '#888',
+              flexShrink: 0,
+            })
+            const roomPalette = { bg: '#FAEEDA', color: '#854F0B' }
+            const freqPalette = { bg: '#E1F5EE', color: '#0F6E56' }
+            const hasUnassigned = trackerUnassigned.length > 0
+            return (
+              <>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+                  <button onClick={() => setTrackerRoomFilter(null)} style={pillStyle(trackerRoomFilter === null, roomPalette)}>
+                    All rooms
+                  </button>
+                  {hasUnassigned && (
+                    <button onClick={() => setTrackerRoomFilter('unassigned')} style={pillStyle(trackerRoomFilter === 'unassigned', roomPalette)}>
+                      Unassigned
+                    </button>
+                  )}
+                  {trackerRooms.map((room) => (
+                    <button key={room} onClick={() => setTrackerRoomFilter(room)} style={pillStyle(trackerRoomFilter === room, roomPalette)}>
+                      {room}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', overflowX: 'auto', paddingBottom: '4px' }}>
+                  <button onClick={() => setTrackerFreqFilter(null)} style={pillStyle(trackerFreqFilter === null, freqPalette)}>
+                    All frequencies
+                  </button>
+                  {HH_FREQUENCIES.map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setTrackerFreqFilter(f)}
+                      style={{ ...pillStyle(trackerFreqFilter === f, freqPalette), textTransform: 'capitalize' }}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )
+          })()}
 
-          {/* Per-room groups */}
-          {trackerRooms.map((room) => (
-            <div key={room} style={{ marginBottom: '4px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', marginTop: '4px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#854F0B', background: '#FAEEDA', padding: '3px 10px', borderRadius: '20px' }}>
-                  {room}
-                </span>
-                <div style={{ flex: 1, height: '0.5px', background: '#f0ede8' }} />
-              </div>
-              {renderTrackerGroup(hhRoutines.filter((r) => r.room === room))}
-            </div>
-          ))}
+          {(() => {
+            const toggleCollapsed = (k) => setCollapsedTrackerRooms((prev) => {
+              const next = new Set(prev)
+              if (next.has(k)) next.delete(k); else next.add(k)
+              return next
+            })
+            // When a specific filter is active, always expand. Otherwise honor the collapse set.
+            const isExpanded = (k) => trackerRoomFilter !== null ? true : !collapsedTrackerRooms.has(k)
+
+            const renderHeader = (key, label, count) => {
+              const expanded = isExpanded(key)
+              const isUnassigned = key === 'unassigned'
+              return (
+                <button
+                  onClick={() => trackerRoomFilter === null && toggleCollapsed(key)}
+                  disabled={trackerRoomFilter !== null}
+                  style={{
+                    display: 'flex', width: '100%', alignItems: 'center', gap: '8px',
+                    marginBottom: '12px', marginTop: '4px',
+                    background: 'none', border: 'none', padding: 0, fontFamily: 'inherit',
+                    cursor: trackerRoomFilter === null ? 'pointer' : 'default',
+                  }}
+                >
+                  <span style={{
+                    fontSize: '12px', fontWeight: 600,
+                    color:      isUnassigned ? '#888'    : '#854F0B',
+                    background: isUnassigned ? '#f0ede8' : '#FAEEDA',
+                    padding: '3px 10px', borderRadius: '20px',
+                  }}>
+                    {label}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#bbb' }}>
+                    {count} routine{count !== 1 ? 's' : ''}
+                  </span>
+                  <div style={{ flex: 1, height: '0.5px', background: '#f0ede8' }} />
+                  {trackerRoomFilter === null && (
+                    <svg
+                      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                      style={{ width: 14, height: 14, color: '#bbb', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  )}
+                </button>
+              )
+            }
+
+            const matchesFreq = (r) => !trackerFreqFilter || r.frequency === trackerFreqFilter
+
+            const unassignedItems = trackerUnassigned.filter(matchesFreq)
+            const showUnassigned = unassignedItems.length > 0
+              && (trackerRoomFilter === null || trackerRoomFilter === 'unassigned')
+
+            const visibleRooms = trackerRooms
+              .filter((r) => trackerRoomFilter === null || trackerRoomFilter === r)
+              .map((room) => ({ room, items: hhRoutines.filter((r) => r.room === room && matchesFreq(r)) }))
+              .filter(({ items }) => items.length > 0)
+
+            if (!showUnassigned && visibleRooms.length === 0) {
+              return (
+                <div style={{ fontSize: '13px', color: '#aaa', padding: '4px 0 8px' }}>
+                  No routines match the current filters.
+                </div>
+              )
+            }
+
+            return (
+              <>
+                {showUnassigned && (
+                  <div style={{ marginBottom: '4px' }}>
+                    {renderHeader('unassigned', 'Unassigned', unassignedItems.length)}
+                    {isExpanded('unassigned') && renderTrackerGroup(unassignedItems)}
+                  </div>
+                )}
+
+                {visibleRooms.map(({ room, items }) => (
+                  <div key={room} style={{ marginBottom: '4px' }}>
+                    {renderHeader(room, room, items.length)}
+                    {isExpanded(room) && renderTrackerGroup(items)}
+                  </div>
+                ))}
+              </>
+            )
+          })()}
         </div>
       )}
 
@@ -879,15 +1151,55 @@ export default function Routines() {
 
           {!hhCollapsed && (
             <div style={{ marginTop: '16px' }}>
+              {/* Room filter pills */}
+              {(() => {
+                const roomsInUse = HH_ROOMS.filter((room) => hhRoutines.some((r) => r.room === room))
+                const hasUnassigned = hhRoutines.some((r) => !r.room)
+                if (roomsInUse.length === 0 && !hasUnassigned) return null
+
+                const pillStyle = (active) => ({
+                  padding: '5px 12px', borderRadius: '20px', border: 'none', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap',
+                  background: active ? '#FAEEDA' : '#f0ede8',
+                  color:      active ? '#854F0B' : '#888',
+                  flexShrink: 0,
+                })
+
+                return (
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
+                    <button onClick={() => setHhRoomFilter(null)} style={pillStyle(hhRoomFilter === null)}>
+                      All
+                    </button>
+                    {hasUnassigned && (
+                      <button onClick={() => setHhRoomFilter('unassigned')} style={pillStyle(hhRoomFilter === 'unassigned')}>
+                        Unassigned
+                      </button>
+                    )}
+                    {roomsInUse.map((room) => (
+                      <button key={room} onClick={() => setHhRoomFilter(room)} style={pillStyle(hhRoomFilter === room)}>
+                        {room}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
+
               {HH_FREQUENCIES.map((freq) => {
-                const items = hhByFreq(freq)
+                let items = hhByFreq(freq)
+                if (hhRoomFilter === 'unassigned') {
+                  items = items.filter((r) => !r.room)
+                } else if (hhRoomFilter) {
+                  items = items.filter((r) => r.room === hhRoomFilter)
+                }
                 return (
                   <div key={freq} style={{ marginBottom: '16px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 600, color: '#aaa', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '6px' }}>
                       {freq}
                     </div>
                     {items.length === 0 && (
-                      <div style={{ fontSize: '12px', color: '#ccc', marginBottom: '6px' }}>No {freq} routines yet</div>
+                      <div style={{ fontSize: '12px', color: '#ccc', marginBottom: '6px' }}>
+                        {hhRoomFilter ? `No ${freq} routines in this view` : `No ${freq} routines yet`}
+                      </div>
                     )}
                     {items.map((r) => (
                       <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
@@ -920,7 +1232,13 @@ export default function Routines() {
                     ))}
                     {canCreate && (
                       <button
-                        onClick={() => setHhModal({ frequency: freq, text: '', timeOfDay: freq === 'daily' ? 'AM' : null, room: '', zone: '' })}
+                        onClick={() => setHhModal({
+                          frequency: freq,
+                          text: '',
+                          timeOfDay: freq === 'daily' ? 'AM' : null,
+                          room: hhRoomFilter && hhRoomFilter !== 'unassigned' ? hhRoomFilter : '',
+                          zone: '',
+                        })}
                         style={{ fontSize: '12px', color: '#aaa', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
                       >
                         + Add {freq} routine

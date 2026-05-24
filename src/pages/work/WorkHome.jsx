@@ -92,6 +92,11 @@ export default function WorkHome() {
 
   const wKey = weekKey(currentWeek)
 
+  const todayStr = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
   // ── Load projects (real-time) ────────────────────────────────────────────────
 
   useEffect(() => {
@@ -220,22 +225,31 @@ export default function WorkHome() {
     if (actionModal.id) {
       const idx = items.findIndex((i) => i.id === actionModal.id)
       if (idx >= 0) {
-        items[idx] = {
-          ...items[idx],
+        const existing = items[idx]
+        const updated = {
+          ...existing,
           title:      actionModal.title.trim(),
           completeBy: actionModal.completeBy || null,
           status:     actionModal.status,
           priority:   actionModal.priority || 'Medium',
         }
+        if (actionModal.status === 'Complete' && existing.status !== 'Complete') {
+          updated.completedAt = todayStr
+        } else if (actionModal.status !== 'Complete') {
+          delete updated.completedAt
+        }
+        items[idx] = updated
       }
     } else {
-      items.push({
+      const created = {
         id:         newId(),
         title:      actionModal.title.trim(),
         completeBy: actionModal.completeBy || null,
         status:     actionModal.status,
         priority:   actionModal.priority || 'Medium',
-      })
+      }
+      if (actionModal.status === 'Complete') created.completedAt = todayStr
+      items.push(created)
     }
     await setDoc(
       doc(db, 'users', user.uid, 'workProjects', actionModal.projectId, 'weekData', wKey),
@@ -271,13 +285,80 @@ export default function WorkHome() {
     setSaving(false)
   }
 
+  // ── Timesheet export ─────────────────────────────────────────────────────────
+
+  const generateTimesheet = () => {
+    const weekProjects = nonExpiredProjects
+      .filter((p) => isProjectActiveThisWeek(p, currentWeek))
+      .map((p) => ({ ...p, wd: weekDataMap[p.id] || { actionItems: [], notes: [], recap: '' } }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    const lines = [`# Timesheet: ${weekLabel(currentWeek)}`, '']
+    let totalCompleted = 0
+
+    for (const p of weekProjects) {
+      const completed = (p.wd.actionItems || []).filter((i) => i.status === 'Complete')
+      if (completed.length === 0) continue
+      totalCompleted += completed.length
+
+      lines.push(`## ${p.name}`, '')
+
+      const byDay = {}
+      for (const item of completed) {
+        const key = item.completedAt || 'unknown'
+        if (!byDay[key]) byDay[key] = []
+        byDay[key].push(item)
+      }
+
+      const dayKeys = Object.keys(byDay).sort((a, b) => {
+        if (a === 'unknown') return 1
+        if (b === 'unknown') return -1
+        return a.localeCompare(b)
+      })
+
+      for (const dayKey of dayKeys) {
+        const heading = dayKey === 'unknown'
+          ? 'Date unknown'
+          : parseLocalDate(dayKey).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+        lines.push(`### ${heading}`)
+        for (const item of byDay[dayKey]) {
+          lines.push(`- ${item.title}`)
+        }
+        lines.push('')
+      }
+    }
+
+    if (totalCompleted === 0) {
+      lines.push('_No completed tasks this week._')
+    }
+
+    const markdown = lines.join('\n')
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `timesheet-${wKey}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   // ── Status cycling (inline from WorkHome) ───────────────────────────────────
 
   const cycleStatus = async (projectId, item) => {
     const wd    = weekDataMap[projectId] || {}
-    const items = (wd.actionItems || []).map((i) =>
-      i.id === item.id ? { ...i, status: STATUS_CYCLE[i.status] || 'Not started' } : i
-    )
+    const items = (wd.actionItems || []).map((i) => {
+      if (i.id !== item.id) return i
+      const nextStatus = STATUS_CYCLE[i.status] || 'Not started'
+      const updated = { ...i, status: nextStatus }
+      if (nextStatus === 'Complete') {
+        updated.completedAt = todayStr
+      } else {
+        delete updated.completedAt
+      }
+      return updated
+    })
     await setDoc(
       doc(db, 'users', user.uid, 'workProjects', projectId, 'weekData', wKey),
       { actionItems: items },
@@ -286,11 +367,6 @@ export default function WorkHome() {
   }
 
   // ── Derived data ─────────────────────────────────────────────────────────────
-
-  const todayStr = (() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  })()
 
   const nonExpiredProjects = projects.filter((p) => !p.endDate || p.endDate >= todayStr)
 
@@ -368,6 +444,23 @@ export default function WorkHome() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ width: 14, height: 14 }}>
               <polyline points="9 18 15 12 9 6" />
             </svg>
+          </button>
+        </div>
+        <div style={{ borderTop: '0.5px solid #f5f4f1', marginTop: '10px', paddingTop: '10px', display: 'flex', justifyContent: 'center' }}>
+          <button
+            onClick={generateTimesheet}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: '12px', color: '#888', padding: '2px 6px',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Generate timesheet
           </button>
         </div>
       </div>

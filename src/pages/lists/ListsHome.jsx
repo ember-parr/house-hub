@@ -81,6 +81,8 @@ export default function ListsHome() {
         <Link to="/lists/inventory" className="nav-card"><h2>Inventory</h2></Link>
         <Link to="/lists/shopping"  className="nav-card"><h2>Shopping</h2></Link>
         <Link to="/lists/Wishlist"  className="nav-card"><h2>Wish Lists</h2></Link>
+        <Link to="/lists/HouseNotes" className="nav-card"><h2>Home Notes</h2></Link>
+        <Link to="/lists/PersonalNotes" className="nav-card"><h2>Personal Notes</h2></Link>
       </div>
 
       <div style={{ marginTop: '1.5rem' }}>

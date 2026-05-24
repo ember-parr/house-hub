@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import {
-  collection, addDoc, updateDoc, deleteDoc,
+  collection, setDoc, updateDoc, deleteDoc,
   doc, query, orderBy, onSnapshot,
   serverTimestamp,
 } from 'firebase/firestore'
+import { ref as storageRef, deleteObject } from 'firebase/storage'
+import { storage } from '../../firebase'
 import RichTextEditor, { isEmptyHtml } from '../../components/RichTextEditor'
+import Attachments from '../../components/Attachments'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -15,6 +18,19 @@ function formatDate(ts) {
   if (!ts) return ''
   const d = ts.toDate ? ts.toDate() : new Date(ts)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+async function deleteStorageFiles(attachments) {
+  for (const att of (attachments || [])) {
+    if (att.kind === 'file' && att.path) {
+      try { await deleteObject(storageRef(storage, att.path)) } catch { /* ignore */ }
+    }
+  }
+}
+
+function diffByPath(a, b) {
+  const bIds = new Set((b || []).map((x) => x.id))
+  return (a || []).filter((x) => !bIds.has(x.id))
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -45,18 +61,33 @@ export default function PersonalNotes() {
     id: note.id,
     title: note.title,
     content: note.content || '',
+    attachments: note.attachments || [],
+    baselineAttachments: note.attachments || [],
     updatedAt: note.updatedAt,
   })
 
-  const openAdd = () => setModal({
-    mode: 'edit',
-    title: '',
-    content: '',
-  })
+  const openAdd = () => {
+    if (!user) return
+    setModal({
+      mode: 'edit',
+      id: doc(collection(db, 'users', user.uid, 'personalNotes')).id,
+      isNew: true,
+      title: '',
+      content: '',
+      attachments: [],
+      baselineAttachments: [],
+    })
+  }
 
   const startEdit = () => setModal((m) => ({ ...m, mode: 'edit' }))
 
-  const close = () => setModal(null)
+  const close = () => {
+    if (modal) {
+      const added = diffByPath(modal.attachments, modal.baselineAttachments)
+      deleteStorageFiles(added)
+    }
+    setModal(null)
+  }
 
   const save = async () => {
     if (!modal?.title?.trim() || !user) return
@@ -64,24 +95,27 @@ export default function PersonalNotes() {
     const payload = {
       title:     modal.title.trim(),
       content:   modal.content || '',
+      attachments: modal.attachments || [],
       updatedAt: serverTimestamp(),
     }
-    if (modal.id) {
-      await updateDoc(doc(db, 'users', user.uid, 'personalNotes', modal.id), payload)
+    const ref = doc(db, 'users', user.uid, 'personalNotes', modal.id)
+    if (modal.isNew) {
+      await setDoc(ref, { ...payload, createdAt: serverTimestamp() })
     } else {
-      await addDoc(collection(db, 'users', user.uid, 'personalNotes'), {
-        ...payload,
-        createdAt: serverTimestamp(),
-      })
+      await updateDoc(ref, payload)
     }
+    const removed = diffByPath(modal.baselineAttachments, modal.attachments)
+    await deleteStorageFiles(removed)
     setSaving(false)
-    close()
+    setModal(null)
   }
 
   const remove = async (id) => {
     if (!user) return
+    const note = notes.find((n) => n.id === id)
+    await deleteStorageFiles(note?.attachments)
     await deleteDoc(doc(db, 'users', user.uid, 'personalNotes', id))
-    close()
+    setModal(null)
   }
 
   return (
@@ -170,18 +204,19 @@ export default function PersonalNotes() {
                   </div>
                 )}
                 {isEmptyHtml(modal.content) ? (
-                  <div style={{ fontSize: '13px', color: '#bbb', fontStyle: 'italic' }}>No content.</div>
+                  <div style={{ fontSize: '13px', color: '#bbb', fontStyle: 'italic', marginBottom: '12px' }}>No content.</div>
                 ) : (
                   <div
                     className="rich-text-content"
-                    style={{ fontSize: '13px', lineHeight: 1.55, color: '#1a2920' }}
+                    style={{ fontSize: '13px', lineHeight: 1.55, color: '#1a2920', marginBottom: '12px' }}
                     dangerouslySetInnerHTML={{ __html: modal.content }}
                   />
                 )}
+                <Attachments mode="view" attachments={modal.attachments} />
               </>
             ) : (
               <>
-                <h2 className="modal-title">{modal.id ? 'Edit note' : 'Add personal note'}</h2>
+                <h2 className="modal-title">{modal.isNew ? 'Add personal note' : 'Edit note'}</h2>
                 <input
                   className="form-input"
                   placeholder="Title *"
@@ -193,8 +228,14 @@ export default function PersonalNotes() {
                   initialHtml={modal.content}
                   onChange={(html) => setModal((m) => ({ ...m, content: html }))}
                 />
+                <Attachments
+                  mode="edit"
+                  attachments={modal.attachments}
+                  onChange={(next) => setModal((m) => ({ ...m, attachments: next }))}
+                  storagePrefix={user ? `users/${user.uid}/personalNotes/${modal.id}` : null}
+                />
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  {modal.id && (
+                  {!modal.isNew && (
                     <button
                       onClick={() => remove(modal.id)}
                       style={{ background: 'none', border: '0.5px solid #f5c5c5', borderRadius: '8px', padding: '9px 14px', fontSize: '13px', color: '#c0392b', cursor: 'pointer', fontFamily: 'inherit' }}
@@ -208,7 +249,7 @@ export default function PersonalNotes() {
                     onClick={save}
                     disabled={!modal.title?.trim() || saving}
                   >
-                    {saving ? 'Saving...' : (modal.id ? 'Save changes' : 'Add note')}
+                    {saving ? 'Saving...' : (modal.isNew ? 'Add note' : 'Save changes')}
                   </button>
                 </div>
               </>

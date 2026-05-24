@@ -109,8 +109,9 @@ export default function WorkProject() {
   // Week data
   const [weekData, setWeekData] = useState({ actionItems: [], notes: [], recap: '' })
 
-  // Action items modal: null | { id?, title, completeBy, status }
+  // Action items modal: null | { id?, title, completeBy, status, priority, notes, subtasks }
   const [actionModal, setActionModal] = useState(null)
+  const [subtaskInput, setSubtaskInput] = useState('')
 
   // Notes
   const [noteInput, setNoteInput]     = useState('')
@@ -249,6 +250,8 @@ export default function WorkProject() {
           completeBy: actionModal.completeBy || null,
           status:     actionModal.status,
           priority:   actionModal.priority || 'Medium',
+          notes:      actionModal.notes || '',
+          subtasks:   actionModal.subtasks || [],
         }
       }
     } else {
@@ -258,11 +261,40 @@ export default function WorkProject() {
         completeBy: actionModal.completeBy || null,
         status:     actionModal.status,
         priority:   actionModal.priority || 'Medium',
+        notes:      actionModal.notes || '',
+        subtasks:   actionModal.subtasks || [],
         createdAt:  new Date().toISOString(),
       })
     }
     await updateField('actionItems', items)
     setActionModal(null)
+    setSubtaskInput('')
+  }
+
+  const addSubtask = () => {
+    const title = subtaskInput.trim()
+    if (!title) return
+    setActionModal((m) => ({
+      ...m,
+      subtasks: [...(m.subtasks || []), { id: newId(), title, done: false }],
+    }))
+    setSubtaskInput('')
+  }
+
+  const toggleSubtask = (id) => {
+    setActionModal((m) => ({
+      ...m,
+      subtasks: (m.subtasks || []).map((s) =>
+        s.id === id ? { ...s, done: !s.done } : s
+      ),
+    }))
+  }
+
+  const removeSubtask = (id) => {
+    setActionModal((m) => ({
+      ...m,
+      subtasks: (m.subtasks || []).filter((s) => s.id !== id),
+    }))
   }
 
   const deleteActionItem = async (id) => {
@@ -398,7 +430,7 @@ export default function WorkProject() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
               <div className="profile-section-title" style={{ margin: 0 }}>Action Items</div>
               <button
-                onClick={() => setActionModal({ title: '', completeBy: getWeekFriday(currentWeek), status: 'Not started', priority: 'Medium' })}
+                onClick={() => { setSubtaskInput(''); setActionModal({ title: '', completeBy: getWeekFriday(currentWeek), status: 'Not started', priority: 'Medium', notes: '', subtasks: [] }) }}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}
               >
@@ -585,8 +617,8 @@ export default function WorkProject() {
 
       {/* ── Action item modal ── */}
       {actionModal && (
-        <div className="modal-overlay" onClick={() => setActionModal(null)}>
-          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { setActionModal(null); setSubtaskInput('') }}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-handle" />
             <h2 className="modal-title">{actionModal.id ? 'Edit action item' : 'Add action item'}</h2>
             <input
@@ -631,6 +663,84 @@ export default function WorkProject() {
                 {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
               </select>
             </div>
+
+            {/* Subtasks */}
+            <div style={{ marginTop: '14px' }}>
+              <div style={labelStyle}>
+                Subtasks{(actionModal.subtasks || []).length > 0 && (
+                  <span style={{ marginLeft: '6px', color: '#bbb' }}>
+                    · {(actionModal.subtasks || []).filter((s) => s.done).length}/{(actionModal.subtasks || []).length}
+                  </span>
+                )}
+              </div>
+              {(actionModal.subtasks || []).map((s) => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '0.5px solid #f5f4f1' }}>
+                  <button
+                    onClick={() => toggleSubtask(s.id)}
+                    style={{
+                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                      border: s.done ? 'none' : '1.5px solid #ddd',
+                      background: s.done ? '#3B6D11' : 'none',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                    }}
+                  >
+                    {s.done && (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" style={{ width: 9, height: 9 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </button>
+                  <div style={{ flex: 1, fontSize: '13px', color: s.done ? '#bbb' : '#444', textDecoration: s.done ? 'line-through' : 'none', wordBreak: 'break-word' }}>
+                    {s.title}
+                  </div>
+                  <button
+                    onClick={() => removeSubtask(s.id)}
+                    aria-label="Remove subtask"
+                    style={{ background: 'none', border: 'none', color: '#c0392b', cursor: 'pointer', padding: '2px 6px', fontFamily: 'inherit', fontSize: '16px', lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                <input
+                  className="form-input"
+                  placeholder="Add subtask..."
+                  value={subtaskInput}
+                  onChange={(e) => setSubtaskInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSubtask() } }}
+                  style={{ flex: 1, margin: 0 }}
+                />
+                <button
+                  type="button"
+                  onClick={addSubtask}
+                  disabled={!subtaskInput.trim()}
+                  style={{
+                    fontSize: '12px', fontWeight: 500,
+                    color: subtaskInput.trim() ? '#185FA5' : '#bbb',
+                    background: subtaskInput.trim() ? '#E6F1FB' : '#f5f4f1',
+                    border: 'none', borderRadius: '6px', padding: '0 14px',
+                    cursor: subtaskInput.trim() ? 'pointer' : 'default', fontFamily: 'inherit',
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div style={{ marginTop: '14px' }}>
+              <div style={labelStyle}>Notes</div>
+              <textarea
+                className="form-input"
+                rows={3}
+                style={{ margin: 0, width: '100%', resize: 'vertical', fontSize: '13px', boxSizing: 'border-box' }}
+                placeholder="Add notes for this action item..."
+                value={actionModal.notes || ''}
+                onChange={(e) => setActionModal({ ...actionModal, notes: e.target.value })}
+              />
+            </div>
+
             <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
               {actionModal.id && (
                 <button
@@ -775,11 +885,29 @@ function ActionRow({ item, onCycle, onEdit }) {
               Due {new Date(item.completeBy + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
           )}
+          {(item.subtasks || []).length > 0 && (
+            <span style={{ fontSize: '11px', color: '#bbb' }}>
+              ☑ {(item.subtasks || []).filter((s) => s.done).length}/{(item.subtasks || []).length}
+            </span>
+          )}
+          {item.notes && item.notes.trim() && (
+            <span style={{ fontSize: '11px', color: '#bbb' }} title={item.notes}>
+              📝
+            </span>
+          )}
         </div>
       </div>
 
       <button
-        onClick={() => onEdit({ id: item.id, title: item.title, completeBy: item.completeBy || '', status: item.status, priority: item.priority || 'Medium' })}
+        onClick={() => onEdit({
+          id: item.id,
+          title: item.title,
+          completeBy: item.completeBy || '',
+          status: item.status,
+          priority: item.priority || 'Medium',
+          notes: item.notes || '',
+          subtasks: item.subtasks || [],
+        })}
         style={{ fontSize: '11px', color: '#bbb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', flexShrink: 0 }}
       >
         Edit
